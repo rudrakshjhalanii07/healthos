@@ -1,18 +1,53 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+import { DarkTheme, DefaultTheme, SplashScreen, Stack, ThemeProvider } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+import { Colors } from '@/constants/theme';
+import { StoreProvider, useStore } from '@/lib/store';
+import { ThemeModeProvider, useThemeMode } from '@/lib/theme-mode';
 
 SplashScreen.preventAutoHideAsync();
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+export default function RootLayout() {
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
+    <ThemeModeProvider>
+      <StoreProvider>
+        <RootNavigator />
+      </StoreProvider>
+    </ThemeModeProvider>
+  );
+}
+
+function RootNavigator() {
+  const { ready, username, data } = useStore();
+  const { resolved } = useThemeMode();
+  if (ready) SplashScreen.hide();
+
+  const base = resolved === 'dark' ? DarkTheme : DefaultTheme;
+  const navTheme = {
+    ...base,
+    colors: { ...base.colors, background: Colors.bg, card: Colors.bg, primary: Colors.accent, text: Colors.text, border: Colors.border },
+  };
+
+  // Until storage has loaded, leave every route open so nothing redirects prematurely;
+  // screens render blank while `ready` is false.
+  const signedIn = !ready || !!username;
+  const onboarded = !ready || (!!username && !!data.profile);
+
+  return (
+    <ThemeProvider value={navTheme}>
+      <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.bg } }}>
+        {/* Order matters: when a guard flips, the first available screen wins. */}
+        <Stack.Protected guard={onboarded}>
+          <Stack.Screen name="index" />
+        </Stack.Protected>
+        <Stack.Protected guard={signedIn}>
+          <Stack.Screen name="onboarding" />
+        </Stack.Protected>
+        <Stack.Protected guard={!ready || !username}>
+          <Stack.Screen name="login" />
+        </Stack.Protected>
+      </Stack>
     </ThemeProvider>
   );
 }
