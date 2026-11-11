@@ -6,7 +6,6 @@ import { Badge, Button, Card, CardHeader, IconButton, Icons, ProgressBar, T } fr
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
 import { formatDay, todayKey } from '@/lib/dates';
 import { CALIBRATION_DAYS, DAYS_FOR_PLAN, type Habits, type Proposal, weightTrend } from '@/lib/learn';
-import { MEAL_LABEL, MEAL_ORDER } from '@/lib/macros';
 import { type Allowance, kgToLb, lbToKg, type Profile } from '@/lib/profile';
 import type { WeighIn } from '@/lib/store';
 
@@ -26,9 +25,6 @@ function observations(h: Habits, weightKg: number, proteinTarget: number) {
     out.push(`${heavy.map((wd) => WD[wd]).join(', ')} run heavier — up to ${lift}% above your average.`);
   }
   if (light.length) out.push(`${light.map((wd) => WD[wd]).join(', ')} are your lighter days.`);
-  const biggest = MEAL_ORDER.reduce((a, b) => (h.mealShare[a] >= h.mealShare[b] ? a : b));
-  if (h.mealShare[biggest] >= 0.4) out.push(`${MEAL_LABEL[biggest]} is ${pct(h.mealShare[biggest])} of your day.`);
-  if (h.mealShare.breakfast < 0.05) out.push('You mostly skip breakfast — the plan won’t budget one.');
   const target = proteinTarget / weightKg;
   if (h.proteinPerKg && h.proteinPerKg < target - 0.3) {
     out.push(`Protein averages ${h.proteinPerKg.toFixed(1)} g/kg — the plan nudges it toward ${target.toFixed(1)}.`);
@@ -205,11 +201,6 @@ export function ProposalCard({
       </View>
 
       <View style={styles.chips}>
-        {MEAL_ORDER.filter((m) => p.mealWeights[m] >= 0.03).map((m) => (
-          <Badge key={m} color={Colors.textDim} bg={Colors.surfaceHover}>
-            {MEAL_LABEL[m]} {pct(p.mealWeights[m])}
-          </Badge>
-        ))}
         <Badge color={Colors.textDim} bg={Colors.surfaceHover}>
           Protein {proteinTarget} g/day
         </Badge>

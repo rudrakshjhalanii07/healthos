@@ -1,5 +1,5 @@
 import { formatDay } from './dates';
-import { type DayMacros, MEAL_LABEL, type MealPlan } from './macros';
+import type { DayBudget, DayMacros } from './macros';
 import type { DayPlan } from './planner';
 
 export type Hint = { tone: 'good' | 'warn' | 'info'; title: string; text: string };
@@ -16,22 +16,20 @@ function macroList(parts: [number, string][], sign = '') {
 
 /**
  * Turns the plan for one day into plain-language guidance: what yesterday's overage costs today,
- * what the very next meal should look like after earlier meals ran over, and what spills into tomorrow.
+ * what's left of today after everything logged so far, and what spills into tomorrow.
  */
 export function coachHints({
   day,
   dm,
-  meals,
+  budget,
   nextDay,
   nextDm,
-  mainMeals,
 }: {
   day: DayPlan;
   dm: DayMacros;
-  meals: MealPlan;
+  budget: DayBudget;
   nextDay?: DayPlan;
   nextDm?: DayMacros;
-  mainMeals: number;
 }): Hint[] {
   const hints: Hint[] = [];
   const isToday = day.status === 'today' && !day.locked;
@@ -43,9 +41,9 @@ export function coachHints({
       [dm.prevExcess.carbs, 'carbs'],
       [dm.prevExcess.fat, 'fat'],
     ], '+');
-    const perMeal = macroList([
-      [dm.cut.carbs / mainMeals, 'carbs'],
-      [dm.cut.fat / mainMeals, 'fat'],
+    const cut = macroList([
+      [dm.cut.carbs, 'carbs'],
+      [dm.cut.fat, 'fat'],
     ], '−');
     const rest = day.carriedOver - day.payback;
     hints.push({
@@ -53,84 +51,63 @@ export function coachHints({
       title: day.status === 'today' ? 'Making up for yesterday' : 'Making up for the day before',
       text:
         `It ran ${kcal(day.carriedOver)} over${excess ? ` (${excess})` : ''}, so this day is ${kcal(day.payback)} lighter` +
-        `${perMeal ? `: ${perMeal} in each main meal` : ''}.` +
+        `${cut ? ` (${cut})` : ''}.` +
         (rest > 20 ? ` The other ${kcal(rest)} is spread over the rest of the week.` : ''),
     });
   }
 
-  // 2. The very next meal, after whatever earlier meals did today.
-  if (isToday && meals.next) {
-    const n = meals.next;
-    const label = MEAL_LABEL[n.meal].toLowerCase();
-    const heavy = meals.meals.filter((m) => m.status === 'done' && m.eaten.carbs - m.usual.carbs > 10);
-    const fatty = meals.meals.filter((m) => m.status === 'done' && m.eaten.fat - m.usual.fat > 6);
-    const dc = n.budget.carbs - n.usual.carbs;
-    const df = n.budget.fat - n.usual.fat;
-
-    if (meals.remaining.carbs <= 0) {
+  // 2. What's left of today, after everything logged so far.
+  if (isToday && budget.eaten.kcal > 0) {
+    const left = budget.remaining;
+    if (left.carbs <= 0) {
       hints.push({
         tone: 'warn',
         title: 'Carbs are done for today',
-        text: `You’re ${g(-meals.remaining.carbs)} past today’s carbs. Keep the rest of today to protein and veg — anything more is taken out of tomorrow’s meals.`,
+        text: `You’re ${g(-left.carbs)} past today’s carbs. Keep the rest of today to protein and veg — anything more is taken out of tomorrow.`,
       });
-    } else if ((heavy.length || fatty.length) && (dc < -8 || df < -5)) {
-      const why = [
-        ...heavy.map((m) => `${MEAL_LABEL[m.meal].toLowerCase()} ran +${g(m.eaten.carbs - m.usual.carbs)} carbs`),
-        ...fatty.map((m) => `${MEAL_LABEL[m.meal].toLowerCase()} ran +${g(m.eaten.fat - m.usual.fat)} fat`),
-      ].join(' and ');
-      const limits = [
-        dc < -8 ? `≤ ${g(n.budget.carbs)} carbs (usually ${g(n.usual.carbs)})` : null,
-        df < -5 ? `≤ ${g(n.budget.fat)} fat (usually ${g(n.usual.fat)})` : null,
-      ].filter(Boolean);
+    } else if (left.fat <= 0) {
       hints.push({
         tone: 'warn',
-        title: `Keep ${label} lighter`,
-        text: `${why ? `${capitalize(why)}, so ` : ''}aim for ${limits.join(' and ')} at ${label}. Doing it now keeps tomorrow untouched.`,
-      });
-    } else if (n.budget.kcal - n.usual.kcal > 80) {
-      hints.push({
-        tone: 'good',
-        title: 'Room to spare',
-        text: `Earlier meals came in light — ${label} can go up to ${kcal(n.budget.kcal)}.`,
+        title: 'Fat is done for today',
+        text: `You’re ${g(-left.fat)} past today’s fat. Lean protein, veg and plain carbs fit what’s left.`,
       });
     }
 
     const proteinLeft = dm.target.protein - dm.eaten.protein;
-    const doneCount = meals.meals.filter((m) => m.status === 'done' || m.status === 'skipped').length;
-    if (doneCount >= 2 && proteinLeft > dm.target.protein * 0.5) {
-      const tight = meals.remaining.kcal < proteinLeft * 4;
+    if (budget.eaten.kcal >= dm.target.kcal * 0.5 && proteinLeft > dm.target.protein * 0.5) {
+      const tight = left.kcal < proteinLeft * 4;
       hints.push({
         tone: 'info',
         title: 'Protein is behind',
         text: tight
           ? `${g(proteinLeft)} protein still to go but calories are tight — lean picks (egg whites, tofu, whey, fish) close the gap without going over.`
-          : `${g(proteinLeft)} protein still to go — make it the centre of ${label} (~${g(n.budget.protein)}).`,
+          : `${g(proteinLeft)} protein still to go — make it the centre of whatever you eat next.`,
       });
     }
   }
 
   // 3. What today's overage will cost tomorrow.
-  if (isToday && meals.over.kcal > 20) {
+  if (isToday && budget.over.kcal > 20) {
     if (nextDay && nextDm && nextDay.payback === 0) {
       hints.push({
         tone: 'info',
-        title: `${kcal(meals.over.kcal)} over today`,
+        title: `${kcal(budget.over.kcal)} over today`,
         text: 'No drama — it’s spread thinly over the rest of the week.',
       });
     } else if (nextDay && nextDm) {
       const cut = macroList([
-        [nextDm.cut.carbs / mainMeals, 'carbs'],
-        [nextDm.cut.fat / mainMeals, 'fat'],
+        [nextDm.cut.carbs, 'carbs'],
+        [nextDm.cut.fat, 'fat'],
       ], '−');
       hints.push({
         tone: 'warn',
-        title: `${kcal(meals.over.kcal)} over today`,
-        text: `If it stays that way, ${formatDay(nextDay.date, { weekday: 'long' })} repays ${kcal(nextDay.payback)}${cut ? ` — ${cut} per main meal` : ''}.`,
+        title: `${kcal(budget.over.kcal)} over today`,
+        text: `If it stays that way, ${formatDay(nextDay.date, { weekday: 'long' })} repays ${kcal(nextDay.payback)}${cut ? ` (${cut})` : ''}.`,
       });
     } else {
       hints.push({
         tone: 'warn',
-        title: `${kcal(meals.over.kcal)} over today`,
+        title: `${kcal(budget.over.kcal)} over today`,
         text: 'It’s the last day of the week, so the extra goes against this week’s total.',
       });
     }
@@ -138,18 +115,17 @@ export function coachHints({
 
   // 4. Planned treats.
   if (upcoming && dm.allowance.kcal > 0) {
-    const left = meals.allowanceLeft.kcal;
+    const left = budget.allowanceLeft.kcal;
     hints.push({
       tone: 'info',
       title: 'Treats planned',
       text:
         left > 10
-          ? `${kcal(left)} is set aside for your planned treats — the meal budgets already leave room for them.`
-          : 'Your planned treats are logged. Meal budgets now cover everything that’s left.',
+          ? `${kcal(left)} is set aside for your planned treats — today’s budget already leaves room for them.`
+          : 'Your planned treats are logged. Today’s budget now covers everything that’s left.',
     });
   }
 
   return hints;
 }
 
-const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);

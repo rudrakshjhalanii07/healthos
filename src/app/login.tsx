@@ -5,7 +5,10 @@ import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput, View 
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Button, Icons, T } from '@/components/ui';
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
-import { normalizeUsername, type UserMeta, useStore } from '@/lib/store';
+import { api, ApiError } from '@/lib/api';
+import { normalizeUsername, useStore } from '@/lib/store';
+
+const MIN_PASSWORD = 8;
 
 function lastSeen(ts: number) {
   const days = Math.floor((Date.now() - ts) / 86_400_000);
@@ -14,26 +17,55 @@ function lastSeen(ts: number) {
   return `active ${days} days ago`;
 }
 
+type Pending = { username: string; exists: boolean };
+
 export default function Login() {
-  const { ready, users, signIn, forgetUser } = useStore();
+  const { ready, users, signIn, signUp, forgetUser } = useStore();
   const [text, setText] = useState('');
-  const [pending, setPending] = useState<string | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [password, setPassword] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [confirmForget, setConfirmForget] = useState(false);
 
   if (!ready) return <View style={styles.screen} />;
 
   const name = normalizeUsername(text);
-  const existing: UserMeta | undefined = pending ? users.find((u) => u.username === pending) : undefined;
+  const recent = pending ? users.find((u) => u.username === pending.username) : undefined;
+  const mismatch = !!pending && !pending.exists && confirmPw.length > 0 && confirmPw !== password;
+  const canSubmit =
+    !!pending && !busy && (pending.exists ? password.length > 0 : password.length >= MIN_PASSWORD && confirmPw === password);
 
-  const confirm = async () => {
-    if (!pending) return;
+  const run = async (f: () => Promise<void>) => {
     setBusy(true);
+    setError(null);
     try {
-      await signIn(pending);
+      await f();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Something went wrong. Try again.');
     } finally {
       setBusy(false);
     }
+  };
+
+  const choose = (username: string) =>
+    run(async () => {
+      const { exists } = await api<{ exists: boolean }>(`/api/auth/exists?username=${encodeURIComponent(username)}`);
+      setPending({ username, exists });
+      setPassword('');
+      setConfirmPw('');
+    });
+
+  const submit = () => {
+    if (!pending || !canSubmit) return;
+    run(() => (pending.exists ? signIn(pending.username, password) : signUp(pending.username, password)));
+  };
+
+  const back = () => {
+    setPending(null);
+    setError(null);
+    setConfirmForget(false);
   };
 
   return (
@@ -58,7 +90,7 @@ export default function Login() {
               <T variant="title" style={{ fontSize: 22 }}>
                 Who’s planning?
               </T>
-              <T variant="body">Pick a username. Your plan stays on this device — nothing is uploaded.</T>
+              <T variant="body">Sign in or pick a username for a new account. Your plan syncs across your devices.</T>
             </View>
 
             <View style={styles.inputWrap}>
@@ -72,9 +104,10 @@ export default function Login() {
                 placeholderTextColor={Colors.textMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
+                autoComplete="username"
                 autoFocus
                 style={styles.input}
-                onSubmitEditing={() => name && setPending(name)}
+                onSubmitEditing={() => name && choose(name)}
               />
             </View>
             {text.trim().length > 0 && !name && (
@@ -82,7 +115,12 @@ export default function Login() {
                 2–24 characters: letters, numbers, dot, dash or underscore.
               </T>
             )}
-            <Button kind="primary" disabled={!name} onPress={() => name && setPending(name)}>
+            {error && (
+              <T variant="caption" color={Colors.danger}>
+                {error}
+              </T>
+            )}
+            <Button kind="primary" disabled={!name || busy} onPress={() => name && choose(name)}>
               Continue
             </Button>
 
@@ -94,7 +132,7 @@ export default function Login() {
                 {users.map((u) => (
                   <Pressable
                     key={u.username}
-                    onPress={() => setPending(u.username)}
+                    onPress={() => choose(u.username)}
                     style={(s) => [styles.user, (s as { hovered?: boolean }).hovered && { backgroundColor: Colors.surfaceHover }]}>
                     <Avatar name={u.username} />
                     <View style={{ flex: 1 }}>
@@ -112,40 +150,75 @@ export default function Login() {
         ) : (
           <>
             <View style={styles.confirm}>
-              <Avatar name={pending} size={52} />
+              <Avatar name={pending.username} size={52} />
               <View style={{ alignItems: 'center', gap: 4 }}>
                 <T variant="title" style={{ fontSize: 20 }}>
-                  {existing ? `Welcome back, @${pending}` : `Create @${pending}?`}
+                  {pending.exists ? `Welcome back, @${pending.username}` : `Create @${pending.username}`}
                 </T>
                 <T variant="body" style={{ textAlign: 'center' }}>
-                  {existing
-                    ? `Continue with the plan saved on this device (${lastSeen(existing.lastActiveAt)}).`
-                    : 'A new profile will be set up on this device. There’s no password — anyone using this device can open it.'}
+                  {pending.exists
+                    ? 'Enter your password to open your plan.'
+                    : `Choose a password (at least ${MIN_PASSWORD} characters). You’ll use it to sign in on any device.`}
                 </T>
               </View>
             </View>
-            <Button kind="primary" disabled={busy} onPress={confirm}>
-              {existing ? `Continue as @${pending}` : 'Create profile'}
+
+            <View style={styles.inputWrap}>
+              <TextInput
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Password"
+                placeholderTextColor={Colors.textMuted}
+                secureTextEntry
+                autoCapitalize="none"
+                autoComplete={pending.exists ? 'current-password' : 'new-password'}
+                autoFocus
+                style={styles.input}
+                onSubmitEditing={submit}
+              />
+            </View>
+            {!pending.exists && (
+              <View style={styles.inputWrap}>
+                <TextInput
+                  value={confirmPw}
+                  onChangeText={setConfirmPw}
+                  placeholder="Confirm password"
+                  placeholderTextColor={Colors.textMuted}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoComplete="new-password"
+                  style={styles.input}
+                  onSubmitEditing={submit}
+                />
+              </View>
+            )}
+            {mismatch && (
+              <T variant="caption" color={Colors.warn}>
+                Passwords don’t match.
+              </T>
+            )}
+            {error && (
+              <T variant="caption" color={Colors.danger}>
+                {error}
+              </T>
+            )}
+
+            <Button kind="primary" disabled={!canSubmit} onPress={submit}>
+              {busy ? 'One moment…' : pending.exists ? 'Sign in' : 'Create account'}
             </Button>
-            <Button
-              kind="ghost"
-              onPress={() => {
-                setPending(null);
-                setConfirmForget(false);
-              }}>
-              {existing ? 'Not you? Use another name' : 'Use a different name'}
+            <Button kind="ghost" onPress={back}>
+              {pending.exists ? 'Not you? Use another name' : 'Use a different name'}
             </Button>
-            {existing && (
+            {recent && (
               <Pressable
                 onPress={async () => {
                   if (!confirmForget) return setConfirmForget(true);
-                  await forgetUser(pending);
-                  setPending(null);
-                  setConfirmForget(false);
+                  await forgetUser(pending.username);
+                  back();
                 }}
                 style={{ alignSelf: 'center', padding: 6 }}>
                 <T variant="caption" color={confirmForget ? Colors.danger : Colors.textMuted}>
-                  {confirmForget ? 'Tap again to delete this profile and its data' : 'Remove this profile from the device'}
+                  {confirmForget ? 'Tap again to remove it from this device' : 'Remove from this device'}
                 </T>
               </Pressable>
             )}

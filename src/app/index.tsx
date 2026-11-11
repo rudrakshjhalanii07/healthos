@@ -57,15 +57,14 @@ export default function Dashboard() {
   const dayIndex = plan.days.indexOf(day);
   const nextDay = plan.days[dayIndex + 1];
   const dm = macroPlan[selected];
-  const meals = model.mealPlanFor(selected);
+  const budget = model.dayBudgetFor(selected);
   const editable = day.status === 'future' || (day.status === 'today' && !day.locked);
   const hints = coachHints({
     day,
     dm,
-    meals,
+    budget,
     nextDay,
     nextDm: nextDay ? macroPlan[nextDay.date] : undefined,
-    mainMeals: model.mainMeals,
   });
 
   const calibration = calibrationStatus(data, today);
@@ -190,7 +189,8 @@ export default function Dashboard() {
                 key={selected}
                 style={wide && { flex: 1.6 }}
                 hints={hints}
-                meals={meals}
+                budget={budget}
+                target={dm.target}
                 prefs={prefs}
                 isToday={day.status === 'today' && !day.locked}
               />
@@ -224,8 +224,8 @@ export default function Dashboard() {
               <FoodLogger
                 style={wide && styles.fill}
                 dayLabel={dayName}
-                onAdd={(entry, meal) => addEntry({ ...entry, meal, date: selected })}
-                mealPlan={editable ? meals : null}
+                onAdd={(entry) => addEntry({ ...entry, date: selected })}
+                budget={editable ? budget : null}
                 prefs={prefs}
               />
               <DayLog
@@ -238,7 +238,7 @@ export default function Dashboard() {
             </View>
 
             <T variant="caption" style={{ textAlign: 'center', paddingVertical: Spacing.three }}>
-              @{username}’s data is stored only on this device. Estimates use typical portion sizes and are approximate.
+              @{username}’s plan syncs to your account and works offline. Estimates use typical portion sizes and are approximate.
             </T>
           </View>
         </ScrollView>

@@ -1,6 +1,6 @@
 import { type DateKey, weekday } from './dates';
 import { capitalize, getFood, servingMacros, type Tag } from './foods';
-import { addM, type Macros, type Meal, scaleM, sumM, ZERO } from './macros';
+import { addM, type Macros, scaleM, sumM, ZERO } from './macros';
 import type { Allowance, Diet, Prefs } from './profile';
 
 // ---- Restrictions ------------------------------------------------------------------------------
@@ -170,6 +170,9 @@ const SNACK_PROTEIN = ['greek yogurt', 'boiled egg', 'roasted chana', 'sprouts',
 const SNACK_CARBS = ['apple', 'banana', 'orange', 'papaya', 'guava'];
 const SUPPLEMENT_FOOD = { whey: 'whey protein', isolate: 'whey isolate', plant: 'plant protein', none: null } as const;
 
+/** What kind of plate to suggest: a breakfast, a main plate, or a small snack. */
+export type IdeaKind = 'breakfast' | 'main' | 'snack';
+
 export type MealIdea = { items: { name: string; portion: string; macros: Macros }[]; total: Macros; note?: string };
 
 const halfSteps = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(n * 2) / 2));
@@ -192,7 +195,7 @@ function item(key: string, servings: number) {
  * to the protein target, a starch sized to whatever carbs are left, and veg to round it out.
  * `seed` rotates through the options so the user can shuffle.
  */
-export function mealIdea(budget: Macros, meal: Meal, prefs: Prefs, seed = 0): MealIdea | null {
+export function mealIdea(budget: Macros, meal: IdeaKind, prefs: Prefs, seed = 0): MealIdea | null {
   const ok = (k: string) => allowed(k, prefs);
   const pick = (list: string[], offset = 0) => {
     const options = list.filter(ok);
@@ -248,7 +251,7 @@ export function mealIdea(budget: Macros, meal: Meal, prefs: Prefs, seed = 0): Me
     const servings = halfSteps(carbRoom / Math.max(per.carbs, 1), 0.5, 3);
     if (per.carbs * servings <= carbRoom + 12) items.push(item(carb, servings));
   } else {
-    note = 'Skip the starch this time — carbs are tight for this meal.';
+    note = 'Skip the starch this time — carbs are tight for what’s left today.';
   }
 
   used = sumM(items.map((i) => i.macros));

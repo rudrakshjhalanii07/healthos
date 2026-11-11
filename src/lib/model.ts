@@ -1,6 +1,6 @@
 import type { DateKey } from './dates';
 import { allowancesOn, matchesAllowance } from './diet';
-import { buildMacroPlan, buildMealPlan, DEFAULT_MEAL_WEIGHTS, type MacroConfig, type Macros, type MealEntry } from './macros';
+import { buildDayBudget, buildMacroPlan, type DayEntry, type MacroConfig, type Macros } from './macros';
 import { buildWeekPlan } from './planner';
 import { DEFAULT_PREFS, macroConfig } from './profile';
 import type { Data, Entry } from './store';
@@ -26,7 +26,6 @@ const FALLBACK_CFG: MacroConfig = { proteinG: 120, fatPct: 0.28, fatMinG: 45, ca
 export function buildModel(data: Data, dates: DateKey[], today: DateKey) {
   const prefs = data.prefs ?? DEFAULT_PREFS;
   const cfg = data.profile ? macroConfig(data.profile, data.learned?.fatPct) : FALLBACK_CFG;
-  const mealWeights = data.learned?.mealWeights ?? DEFAULT_MEAL_WEIGHTS;
   // While still learning, don't front-load paybacks — just observe and spread overages gently.
   const settings = data.learned ? data.settings : { ...data.settings, correction: 'gentle' as const };
 
@@ -62,19 +61,12 @@ export function buildModel(data: Data, dates: DateKey[], today: DateKey) {
 
   const isTreat = (e: Entry) => treats[e.date]?.items.some((i) => matchesAllowance(e, i.allowance)) ?? false;
 
-  const mealPlanFor = (date: DateKey) => {
-    const day = plan.days.find((d) => d.date === date)!;
-    const entries: MealEntry[] = (byDate[date] ?? []).map((e) => ({
-      meal: e.meal,
-      macros: entryMacros(e),
-      isAllowance: isTreat(e),
-    }));
-    return buildMealPlan(day, macroPlan[date], entries, mealWeights);
+  const dayBudgetFor = (date: DateKey) => {
+    const entries: DayEntry[] = (byDate[date] ?? []).map((e) => ({ macros: entryMacros(e), isAllowance: isTreat(e) }));
+    return buildDayBudget(macroPlan[date], entries);
   };
 
-  const mainMeals = (['breakfast', 'lunch', 'dinner'] as const).filter((m) => mealWeights[m] >= 0.03).length || 1;
-
-  return { plan, macroPlan, cfg, prefs, treats, mealPlanFor, isTreat, mainMeals, learning: !data.learned };
+  return { plan, macroPlan, cfg, prefs, treats, dayBudgetFor, isTreat, learning: !data.learned };
 }
 
 export type WeekModel = ReturnType<typeof buildModel>;

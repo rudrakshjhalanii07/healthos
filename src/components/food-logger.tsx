@@ -6,61 +6,41 @@ import { Badge, Button, Card, CardHeader, Icons, Segmented, T } from './ui';
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
 import { conflicts, swapsFor } from '@/lib/diet';
 import { estimateFood } from '@/lib/foods';
-import { MEAL_LABEL, MEAL_ORDER, type Macros, type MealPlan } from '@/lib/macros';
+import type { DayBudget, Macros } from '@/lib/macros';
 import { assumedMacros } from '@/lib/model';
 import type { Prefs } from '@/lib/profile';
-import { type Entry, type Meal, useStore } from '@/lib/store';
+import { type Entry, useStore } from '@/lib/store';
 
-export const MEALS: { value: Meal; label: string }[] = MEAL_ORDER.map((m) => ({ value: m, label: MEAL_LABEL[m] }));
-
-function mealForNow(): Meal {
-  const h = new Date().getHours();
-  if (h < 11) return 'breakfast';
-  if (h < 16) return 'lunch';
-  if (h < 18) return 'snack';
-  return 'dinner';
-}
-
-type NewEntry = Omit<Entry, 'id' | 'createdAt' | 'date' | 'meal'>;
+type NewEntry = Omit<Entry, 'id' | 'createdAt' | 'date'>;
 
 const r = (n: number) => Math.round(n);
 
-/** What logging `m` into `meal` does to the rest of the day, shown before the user commits. */
-function impact(m: Macros, meal: Meal, plan: MealPlan | null): { tone: 'good' | 'warn'; text: string } | null {
-  if (!plan) return null;
-  const row = plan.meals.find((x) => x.meal === meal);
-  const label = MEAL_LABEL[meal].toLowerCase();
-  if (row && (row.status === 'next' || row.status === 'upcoming')) {
-    const overC = m.carbs - row.budget.carbs;
-    const overF = m.fat - row.budget.fat;
-    if (overC > 8 || overF > 5) {
-      const parts = [overC > 8 ? `+${r(overC)} g carbs` : null, overF > 5 ? `+${r(overF)} g fat` : null].filter(Boolean);
-      return { tone: 'warn', text: `${parts.join(', ')} over ${label}’s budget — the meals after it get trimmed to make up.` };
-    }
-    return { tone: 'good', text: `Fits ${label} — leaves ${r(Math.max(0, row.budget.kcal - m.kcal))} kcal of its budget.` };
-  }
-  const leftC = plan.remaining.carbs - m.carbs;
-  if (leftC < -5) return { tone: 'warn', text: `Takes today ${r(-leftC)} g over on carbs — tomorrow’s meals absorb it.` };
-  return { tone: 'good', text: `Leaves ${r(Math.max(0, plan.remaining.kcal - m.kcal))} kcal for the rest of today.` };
+/** What logging `m` does to the rest of the day, shown before the user commits. */
+function impact(m: Macros, budget: DayBudget | null): { tone: 'good' | 'warn'; text: string } | null {
+  if (!budget) return null;
+  const leftK = budget.remaining.kcal - m.kcal;
+  if (leftK < -20) return { tone: 'warn', text: `Takes the day ${r(-leftK)} kcal over — the rest of the week absorbs it.` };
+  const leftC = budget.remaining.carbs - m.carbs;
+  if (leftC < -5) return { tone: 'warn', text: `Takes the day ${r(-leftC)} g over on carbs — tomorrow absorbs it.` };
+  return { tone: 'good', text: `Leaves ${r(Math.max(0, leftK))} kcal for the rest of the day.` };
 }
 
 export function FoodLogger({
   dayLabel,
   onAdd,
-  mealPlan,
+  budget,
   prefs,
   style,
 }: {
   dayLabel: string;
-  onAdd: (entry: NewEntry, meal: Meal) => void;
+  onAdd: (entry: NewEntry) => void;
   /** Only passed for days that can still be rebalanced (today and later). */
-  mealPlan: MealPlan | null;
+  budget: DayBudget | null;
   prefs: Prefs;
   style?: StyleProp<ViewStyle>;
 }) {
   const { data } = useStore();
   const [mode, setMode] = useState<'estimate' | 'manual'>('estimate');
-  const [meal, setMeal] = useState<Meal>(mealForNow);
   const [query, setQuery] = useState('');
   const [manual, setManual] = useState({ name: '', kcal: '', protein: '', carbs: '', fat: '' });
 
@@ -71,7 +51,7 @@ export function FoodLogger({
     .slice(0, 6);
 
   const add = (entry: NewEntry) => {
-    onAdd(entry, meal);
+    onAdd(entry);
     setQuery('');
     setManual({ name: '', kcal: '', protein: '', carbs: '', fat: '' });
   };
@@ -110,8 +90,8 @@ export function FoodLogger({
   };
 
   const top = suggestions[0];
-  const topImpact = top ? impact(top, meal, mealPlan) : null;
-  const manualImpact = manualValid ? impact(manualMacros, meal, mealPlan) : null;
+  const topImpact = top ? impact(top, budget) : null;
+  const manualImpact = manualValid ? impact(manualMacros, budget) : null;
 
   return (
     <Card style={style}>
@@ -129,22 +109,6 @@ export function FoodLogger({
           />
         }
       />
-
-      <View style={styles.meals}>
-        {MEALS.map((m) => {
-          const active = m.value === meal;
-          const budget = mealPlan?.meals.find((x) => x.meal === m.value);
-          const open = budget && (budget.status === 'next' || budget.status === 'upcoming');
-          return (
-            <Pressable key={m.value} onPress={() => setMeal(m.value)} style={[styles.meal, active && styles.mealActive]}>
-              <T variant="label" color={active ? Colors.accent : Colors.textMuted} style={{ fontSize: 12.5 }}>
-                {m.label}
-                {open ? <T variant="caption"> · {r(budget.budget.kcal)}</T> : null}
-              </T>
-            </Pressable>
-          );
-        })}
-      </View>
 
       {mode === 'estimate' ? (
         <View style={{ gap: Spacing.two }}>
@@ -348,15 +312,6 @@ function NumBox({
 }
 
 const styles = StyleSheet.create({
-  meals: { flexDirection: 'row', gap: Spacing.two, flexWrap: 'wrap' },
-  meal: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: Radius.pill,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  mealActive: { borderColor: Colors.accentBorder, backgroundColor: Colors.accentSoft },
   inputWrap: {
     flexDirection: 'row',
     alignItems: 'center',

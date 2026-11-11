@@ -404,7 +404,6 @@ function HowStep({ profile }: { profile: Profile }) {
   const e = energyPlan(profile);
   const learns = [
     ['Which days you eat more', 'Your heavier days get a bigger share of the week — no fixed “weekend”.'],
-    ['How you split meals', 'Skip breakfast? Big dinners? Meal budgets follow your rhythm.'],
     ['Your carb / fat balance', 'Protein is set from your weight; the rest follows how you like to eat.'],
     ['Treats you repeat', 'Beer on Fridays, dessert on Sundays — offered as planned treats, not failures.'],
     ['Your real maintenance', 'Weigh in 3+ times a week and intake vs. trend replaces the formula.'],

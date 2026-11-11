@@ -1,11 +1,10 @@
 /**
- * Learns the user's own pattern from what they log — which days they eat more, how they split
- * meals, their carb/fat balance, recurring treats and (with weigh-ins) their real maintenance —
+ * Learns the user's own pattern from what they log — which days they eat more, their
+ * carb/fat balance, recurring treats and (with weigh-ins) their real maintenance —
  * and turns it into a plan proposal instead of asking them to configure any of it up front.
  */
 import { addDays, type DateKey, fromKey, weekday } from './dates';
 import { getFood, servingMacros } from './foods';
-import { MEAL_ORDER, type Meal } from './macros';
 import { entryMacros } from './model';
 import { type Allowance, energyPlan, formulaMaintenance, KCAL_PER_KG, type Profile } from './profile';
 import type { Data, Entry, WeighIn } from './store';
@@ -22,7 +21,6 @@ export type LearnedPlan = {
   maintenanceSource: 'weight-trend' | 'stated' | 'formula';
   dailyTarget: number;
   dayWeights: number[];
-  mealWeights: Record<Meal, number>;
   fatPct: number;
   basedOnDays: number;
 };
@@ -54,9 +52,6 @@ export type Habits = {
   variability: number;
   weekdayAvg: (number | null)[];
   dayWeights: number[];
-  mealShare: Record<Meal, number>;
-  mealWeights: Record<Meal, number>;
-  snackRate: number;
   macroShare: { protein: number; carbs: number; fat: number };
   proteinPerKg: number;
   treats: { allowance: Allowance; occurrences: number }[];
@@ -150,29 +145,17 @@ export function analyzeHabits(entries: Entry[], weighIns: WeighIn[], from: DateK
   const avgW = mean(dayWeights);
   dayWeights = dayWeights.map((w) => Math.round((w / avgW) * 20) / 20);
 
-  // Meal split and macro balance, over complete days only.
+  // Macro balance, over complete days only.
   const completeEntries = inWindow.filter((e) => completeSet.has(e.date));
-  const mealKcal = Object.fromEntries(MEAL_ORDER.map((m) => [m, 0])) as Record<Meal, number>;
   let p = 0;
   let c = 0;
   let f = 0;
   for (const e of completeEntries) {
-    mealKcal[e.meal] += e.kcal;
     const m = entryMacros(e);
     p += m.protein;
     c += m.carbs;
     f += m.fat;
   }
-  const total = Object.values(mealKcal).reduce((s, x) => s + x, 0) || 1;
-  const mealShare = Object.fromEntries(MEAL_ORDER.map((m) => [m, mealKcal[m] / total])) as Record<Meal, number>;
-  const snackDays = new Set(completeEntries.filter((e) => e.meal === 'snack').map((e) => e.date)).size;
-  const snackRate = complete.length ? snackDays / complete.length : 0;
-  const rawMeal = { ...mealShare, snack: snackRate >= 0.3 ? mealShare.snack : 0 };
-  const rawTotal = Object.values(rawMeal).reduce((s, x) => s + x, 0) || 1;
-  const mealWeights = Object.fromEntries(
-    MEAL_ORDER.map((m) => [m, Math.round((rawMeal[m] / rawTotal) * 100) / 100]),
-  ) as Record<Meal, number>;
-
   const macroKcal = p * 4 + c * 4 + f * 9 || 1;
   const macroShare = { protein: (p * 4) / macroKcal, carbs: (c * 4) / macroKcal, fat: (f * 9) / macroKcal };
 
@@ -188,9 +171,6 @@ export function analyzeHabits(entries: Entry[], weighIns: WeighIn[], from: DateK
     variability: avgIntake ? sd / avgIntake : 0,
     weekdayAvg,
     dayWeights,
-    mealShare,
-    mealWeights,
-    snackRate,
     macroShare,
     proteinPerKg: complete.length ? p / complete.length / profile.weightKg : 0,
     treats,
@@ -210,7 +190,6 @@ export type Proposal = {
   dailyTarget: number;
   stepped: boolean;
   dayWeights: number[];
-  mealWeights: Record<Meal, number>;
   fatPct: number;
   /** Treats seen in the log that aren't planned yet. */
   treats: Allowance[];
@@ -260,7 +239,6 @@ export function buildProposal(data: Data, today: DateKey): Proposal | null {
     dailyTarget,
     stepped: dailyTarget !== goalTarget,
     dayWeights: habits.dayWeights,
-    mealWeights: habits.mealWeights,
     fatPct: clamp(habits.macroShare.fat, 0.2, 0.4),
     treats: habits.treats.map((t) => t.allowance).filter((a) => !planned.has(a.foodKey)),
     changes: [],
@@ -319,7 +297,6 @@ export function planFromProposal(p: Proposal, today: DateKey): LearnedPlan {
     maintenanceSource: p.maintenanceSource,
     dailyTarget: p.dailyTarget,
     dayWeights: p.dayWeights,
-    mealWeights: p.mealWeights,
     fatPct: p.fatPct,
     basedOnDays: p.habits.completeDays,
   };

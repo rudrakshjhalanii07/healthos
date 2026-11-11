@@ -1,33 +1,44 @@
 import { useState } from 'react';
 import { type StyleProp, StyleSheet, View, type ViewStyle } from 'react-native';
 
-import { Badge, Button, Card, CardHeader, Icons, T } from './ui';
+import { Button, Card, CardHeader, Icons, T } from './ui';
 
 import { Colors, Radius, Spacing } from '@/constants/theme';
 import type { Hint } from '@/lib/coach';
-import { mealIdea } from '@/lib/diet';
-import { MEAL_LABEL, type MealBudget, type MealPlan } from '@/lib/macros';
+import { type IdeaKind, mealIdea } from '@/lib/diet';
+import { type DayBudget, type Macros, scaleM } from '@/lib/macros';
 import type { Prefs } from '@/lib/profile';
 
 const toneColor = { good: Colors.accent, warn: Colors.warn, info: Colors.info };
 const r = (n: number) => Math.round(n);
 
+/** A single plate's worth of what's left: at most ~40% of the day, so the idea stays one sitting. */
+function plateFor(left: Macros, dayKcal: number): { budget: Macros; kind: IdeaKind } {
+  const cap = dayKcal * 0.4;
+  const budget = left.kcal > cap ? scaleM(left, cap / left.kcal) : left;
+  const kind: IdeaKind = budget.kcal < 250 ? 'snack' : new Date().getHours() < 11 ? 'breakfast' : 'main';
+  return { budget, kind };
+}
+
 export function CoachCard({
   hints,
-  meals,
+  budget,
+  target,
   prefs,
   isToday,
   style,
 }: {
   hints: Hint[];
-  meals: MealPlan;
+  budget: DayBudget;
+  /** The whole day's target, used to size the idea to one plate. */
+  target: Macros;
   prefs: Prefs;
   isToday: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
   const [seed, setSeed] = useState(0);
-  const next = meals.next;
-  const idea = next ? mealIdea(next.budget, next.meal, prefs, seed) : null;
+  const plate = plateFor(budget.left, target.kcal);
+  const idea = isToday ? mealIdea(plate.budget, plate.kind, prefs, seed) : null;
 
   return (
     <Card style={style}>
@@ -63,18 +74,17 @@ export function CoachCard({
 
       <View style={{ gap: 6 }}>
         <T variant="caption" style={styles.sectionLabel}>
-          MEAL BUDGETS
+          {isToday ? 'LEFT TODAY' : 'DAY BUDGET'}
         </T>
-        {meals.meals.map((m) => (
-          <MealRow key={m.meal} m={m} />
-        ))}
+        <BudgetRow label={isToday ? 'Left' : 'Planned'} m={isToday ? budget.left : target} />
+        {budget.eaten.kcal > 0 && <BudgetRow label="Eaten" m={budget.eaten} muted />}
       </View>
 
-      {isToday && next && idea && (
+      {idea && (
         <View style={styles.idea}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <T variant="caption" style={styles.sectionLabel}>
-              IDEA FOR {MEAL_LABEL[next.meal].toUpperCase()}
+              IDEA THAT FITS WHAT’S LEFT
             </T>
             <Button size="sm" kind="ghost" onPress={() => setSeed((s) => s + 1)}>
               Shuffle
@@ -100,50 +110,27 @@ export function CoachCard({
   );
 }
 
-function MealRow({ m }: { m: MealBudget }) {
-  const upcoming = m.status === 'next' || m.status === 'upcoming';
-  const dc = m.budget.carbs - m.usual.carbs;
-  const shown = upcoming ? m.budget : m.eaten;
-
+function BudgetRow({ label, m, muted }: { label: string; m: Macros; muted?: boolean }) {
   return (
-    <View style={[styles.mealRow, m.status === 'next' && styles.mealNext]}>
-      <View style={{ width: 88, gap: 2 }}>
-        <T variant="label" color={upcoming ? Colors.text : Colors.textMuted}>
-          {MEAL_LABEL[m.meal]}
+    <View style={[styles.budgetRow, !muted && styles.budgetHot]}>
+      <T variant="label" color={muted ? Colors.textMuted : Colors.text} style={{ width: 88 }}>
+        {label}
+      </T>
+      <View style={styles.budgetNums}>
+        <T variant="mono" color={muted ? Colors.textDim : Colors.text} style={{ fontSize: 12.5, minWidth: 64 }}>
+          {r(m.kcal)}
+          <T variant="caption"> kcal</T>
         </T>
-        {m.status === 'next' ? (
-          <Badge color={Colors.accent} bg={Colors.accentSoft}>
-            Next
-          </Badge>
-        ) : (
-          <T variant="caption" style={{ fontSize: 10.5 }}>
-            {m.status === 'done' ? 'eaten' : m.status === 'skipped' ? 'skipped' : 'planned'}
-          </T>
-        )}
+        <T variant="caption" style={styles.macro}>
+          P {r(m.protein)}
+        </T>
+        <T variant="caption" style={styles.macro}>
+          C {r(m.carbs)}
+        </T>
+        <T variant="caption" style={styles.macro}>
+          F {r(m.fat)}
+        </T>
       </View>
-      {m.status === 'skipped' ? (
-        <T variant="caption" style={{ flex: 1 }}>
-          Budget moved to later meals
-        </T>
-      ) : (
-        <View style={styles.mealNums}>
-          <T variant="mono" color={upcoming ? Colors.text : Colors.textDim} style={{ fontSize: 12.5, minWidth: 64 }}>
-            {upcoming ? '≤ ' : ''}
-            {r(shown.kcal)}
-            <T variant="caption"> kcal</T>
-          </T>
-          <T variant="caption" style={styles.macro}>
-            P {r(shown.protein)}
-          </T>
-          <T variant="caption" style={styles.macro} color={upcoming && dc < -8 ? Colors.warn : undefined}>
-            C {r(shown.carbs)}
-            {upcoming && Math.abs(dc) >= 8 ? ` (${dc > 0 ? '+' : '−'}${r(Math.abs(dc))})` : ''}
-          </T>
-          <T variant="caption" style={styles.macro}>
-            F {r(shown.fat)}
-          </T>
-        </View>
-      )}
     </View>
   );
 }
@@ -151,7 +138,7 @@ function MealRow({ m }: { m: MealBudget }) {
 const styles = StyleSheet.create({
   dot: { width: 6, height: 6, borderRadius: 3, marginTop: 7 },
   sectionLabel: { fontWeight: '600', letterSpacing: 0.8, fontSize: 10.5 },
-  mealRow: {
+  budgetRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
@@ -162,8 +149,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     backgroundColor: Colors.surfaceRaised,
   },
-  mealNext: { borderColor: Colors.accentBorder },
-  mealNums: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', columnGap: 10 },
+  budgetHot: { borderColor: Colors.accentBorder },
+  budgetNums: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', columnGap: 10 },
   macro: { minWidth: 36, textAlign: 'right' },
   idea: {
     gap: 6,
