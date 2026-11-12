@@ -1,12 +1,13 @@
 import Head from 'expo-router/head';
 import { router } from 'expo-router';
 import type { ReactNode } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Button, T } from '@/components/ui';
 import { Colors, Radius, Spacing } from '@/constants/theme';
 
 const UPDATED = '12 November 2026';
+const CONTACT = 'rudrakshjhalanii@gmail.com';
 
 export default function Privacy() {
   return (
@@ -83,6 +84,16 @@ export default function Privacy() {
 
         <Section title="Changes">
           <Item>If this policy changes, we’ll update the date above.</Item>
+        </Section>
+
+        <Section title="Contact">
+          <Item>
+            Questions about your data or this policy, or a request we can help with: email{' '}
+            <T variant="body" color={Colors.accent} onPress={() => Linking.openURL(`mailto:${CONTACT}`)}>
+              {CONTACT}
+            </T>
+            .
+          </Item>
         </Section>
 
         <Button kind="primary" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}>
