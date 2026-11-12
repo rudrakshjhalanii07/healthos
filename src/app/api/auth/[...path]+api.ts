@@ -49,7 +49,25 @@ async function proxy(request: Request): Promise<Response> {
   for (const c of upstream.headers.getSetCookie()) {
     out.append('set-cookie', c.replace(/;\s*Partitioned/i, '').replace(/SameSite=None/i, 'SameSite=Lax'));
   }
-  return new Response(await upstream.text(), { status: upstream.status, headers: out });
+  return new Response(withoutTokens(await upstream.text()), { status: upstream.status, headers: out });
+}
+
+/**
+ * Neon echoes the session token in JSON bodies (`token`, `session.token`). The app only needs the
+ * HttpOnly cookie, so drop those copies: script on the page should never be able to read a session.
+ */
+function withoutTokens(text: string): string {
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return text;
+  }
+  if (!body || typeof body !== 'object') return text;
+  const o = body as { token?: unknown; session?: { token?: unknown } | null };
+  delete o.token;
+  if (o.session && typeof o.session === 'object') delete o.session.token;
+  return JSON.stringify(o);
 }
 
 export const GET = proxy;

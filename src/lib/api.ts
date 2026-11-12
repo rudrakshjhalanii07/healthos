@@ -24,7 +24,11 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   }
   const body = (await res.json().catch(() => null)) as (T & { error?: string; message?: string; code?: string }) | null;
   if (!res.ok) {
-    const message = (body?.code && FRIENDLY[body.code]) ?? body?.error ?? body?.message ?? `Request failed (${res.status})`;
+    // 429 comes from the Vercel Firewall rate limit on sign-in, sign-up and password reset.
+    const message =
+      res.status === 429
+        ? 'Too many attempts. Wait a minute and try again.'
+        : ((body?.code && FRIENDLY[body.code]) ?? body?.error ?? body?.message ?? `Request failed (${res.status})`);
     throw new ApiError(message, res.status, body);
   }
   return body as T;
