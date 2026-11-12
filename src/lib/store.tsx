@@ -10,15 +10,11 @@ import { type DayType, DAY_WEIGHT, type PlannerSettings } from './planner';
 import {
   type Allowance,
   dailyBounds,
-  DEFAULT_PREFS,
   DEFAULT_PROFILE,
   energyPlan,
   type Prefs,
   type Profile,
 } from './profile';
-import { DEV_PASSWORD, DEV_USER, normalizeUsername } from './username';
-
-export { normalizeUsername };
 
 export type Entry = {
   id: string;
@@ -57,13 +53,13 @@ export type Data = {
   proposalSnoozedUntil: DateKey | null;
 };
 
-export type UserMeta = { username: string; createdAt: number; lastActiveAt: number };
+export type UserMeta = { email: string; createdAt: number; lastActiveAt: number };
 
-// Accounts live in Neon (see src/app/api). This device keeps a cache of the signed-in user's data so
+// Accounts live in Neon Auth (proxied at /api/auth/*). This device keeps a cache of the signed-in user's data so
 // the app opens instantly and keeps working offline; changes sync back in the background.
 const SESSION_KEY = 'healthos:session';
 const USERS_KEY = 'healthos:users';
-const cacheKey = (username: string) => `healthos:cache:${username}`;
+const cacheKey = (email: string) => `healthos:cache:${email}`;
 
 /** Wait this long after the last change before saving to the server. */
 const SYNC_DELAY_MS = 1000;
@@ -168,18 +164,18 @@ function merge(local: Data, server: Data, removed: Set<string>): Data {
   };
 }
 
-type Account = { username: string; data: Data };
+type Account = { email: string; data: Data };
 
 type Store = {
   ready: boolean;
-  username: string | null;
+  email: string | null;
   users: UserMeta[];
   data: Data;
   /** Throws an `ApiError` with a user-facing message on failure. */
-  signIn: (username: string, password: string) => Promise<void>;
-  signUp: (username: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
-  forgetUser: (username: string) => Promise<void>;
+  forgetUser: (email: string) => Promise<void>;
   saveProfile: (profile: Profile, prefs: Prefs) => void;
   updatePrefs: (patch: Partial<Prefs>) => void;
   addWeighIn: (date: DateKey, kg: number) => void;
@@ -197,7 +193,7 @@ type Store = {
 const StoreContext = createContext<Store | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  // Username and data change together so a write can never land under the wrong user's key.
+  // Email and data change together so a write can never land under the wrong user's key.
   const [account, setAccount] = useState<Account | null>(null);
   const [users, setUsers] = useState<UserMeta[]>([]);
   const [ready, setReady] = useState(false);
@@ -209,7 +205,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const pushing = useRef(false);
 
   const persist = (a: Account) =>
-    AsyncStorage.setItem(cacheKey(a.username), JSON.stringify({ data: a.data, sync: sync.current } satisfies Cache)).catch(
+    AsyncStorage.setItem(cacheKey(a.email), JSON.stringify({ data: a.data, sync: sync.current } satisfies Cache)).catch(
       () => {},
     );
 
@@ -250,7 +246,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Another device saved first: fold its copy in, then save the result on top of its version.
       const server = (e as ApiError).body as { data: Partial<Data> | null; version: number };
       const current = accountRef.current;
-      if (current?.username !== a.username) return;
+      if (current?.email !== a.email) return;
       sync.current = { ...sync.current, version: server.version };
       show({ ...current, data: merge(current.data, hydrate(server.data), new Set(sync.current.removed)) });
     } finally {
@@ -265,82 +261,67 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   };
 
   /** Brings in the server copy. Unsaved local changes are merged rather than overwritten. */
-  const pull = async (username: string) => {
+  const pull = async (email: string) => {
     const server = await api<{ data: Partial<Data> | null; version: number }>('/api/data');
     const current = accountRef.current;
-    if (current?.username !== username) return;
+    if (current?.email !== email) return;
     const serverData = hydrate(server.data);
     const data = sync.current.dirty ? merge(current.data, serverData, new Set(sync.current.removed)) : serverData;
     sync.current = { ...sync.current, version: server.version };
-    show({ username, data });
+    show({ email, data });
     if (sync.current.dirty) await push();
   };
 
   /** Opens a signed-in user from this device's cache, then refreshes from the server. */
-  const open = async (username: string, seed?: (d: Data) => Data) => {
-    const cached = await readJSON<Cache | null>(cacheKey(username), null);
+  const open = async (email: string) => {
+    const cached = await readJSON<Cache | null>(cacheKey(email), null);
     sync.current = cached?.sync ?? FRESH;
-    show({ username, data: hydrate(cached?.data ?? null) });
-    await AsyncStorage.setItem(SESSION_KEY, username).catch(() => {});
+    show({ email, data: hydrate(cached?.data ?? null) });
+    await AsyncStorage.setItem(SESSION_KEY, email).catch(() => {});
 
     const now = Date.now();
     setUsers((list) => {
-      const meta = list.find((u) => u.username === username);
+      const meta = list.find((u) => u.email === email);
       const next = [
-        meta ? { ...meta, lastActiveAt: now } : { username, createdAt: now, lastActiveAt: now },
-        ...list.filter((u) => u.username !== username),
+        meta ? { ...meta, lastActiveAt: now } : { email, createdAt: now, lastActiveAt: now },
+        ...list.filter((u) => u.email !== email),
       ];
       AsyncStorage.setItem(USERS_KEY, JSON.stringify(next)).catch(() => {});
       return next;
     });
 
-    await pull(username).catch((e) => {
+    await pull(email).catch((e) => {
       if (e instanceof ApiError && e.status === 401) clearSession();
     });
-    if (seed && accountRef.current?.username === username) {
-      const seeded = seed(accountRef.current.data);
-      if (seeded !== accountRef.current.data) {
-        sync.current = { ...sync.current, dirty: true };
-        show({ username, data: seeded });
-        schedulePush();
-      }
-    }
   };
 
+  type AuthResponse = { user: { email: string } };
+
   const signIn = async (raw: string, password: string) => {
-    const { username } = await api<{ username: string }>('/api/auth/login', {
+    const { user } = await api<AuthResponse>('/api/auth/sign-in/email', {
       method: 'POST',
-      body: { username: raw, password },
+      body: { email: raw, password },
     });
-    await open(username);
+    await open(user.email);
   };
 
   const signUp = async (raw: string, password: string) => {
-    const { username } = await api<{ username: string }>('/api/auth/signup', {
+    const { user } = await api<AuthResponse>('/api/auth/sign-up/email', {
       method: 'POST',
-      body: { username: raw, password },
+      body: { email: raw, password, name: raw.split('@')[0] },
     });
-    // A fresh account: don't carry over anything an old local-only profile left under this name.
-    await AsyncStorage.removeItem(cacheKey(username)).catch(() => {});
-    await open(username);
+    // A fresh account: don't carry over anything a previous account with this email left on the device.
+    await AsyncStorage.removeItem(cacheKey(user.email)).catch(() => {});
+    await open(user.email);
   };
 
   useEffect(() => {
     (async () => {
-      setUsers(await readJSON<UserMeta[]>(USERS_KEY, []));
+      // Entries saved before accounts moved to email have no `email`; drop them.
+      setUsers((await readJSON<UserMeta[]>(USERS_KEY, [])).filter((u) => u.email));
       const session = await AsyncStorage.getItem(SESSION_KEY).catch(() => null);
-      if (session) {
-        await open(session);
-      } else if (__DEV__) {
-        // Skip login and onboarding while developing.
-        const seed = (d: Data) => (d.profile ? d : withProfile(d, DEFAULT_PROFILE, DEFAULT_PREFS));
-        const login = { method: 'POST', body: { username: DEV_USER, password: DEV_PASSWORD } };
-        await api('/api/auth/login', login).catch(async (e) => {
-          if (e instanceof ApiError && e.status === 401) await api('/api/auth/signup', login);
-          else throw e;
-        });
-        await open(DEV_USER, seed);
-      }
+      // An expired session is detected by the first server call, which then signs out.
+      if (session) await open(session);
     })()
       .catch(() => {})
       .finally(() => setReady(true));
@@ -371,7 +352,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const store: Store = {
     ready,
-    username: account?.username ?? null,
+    email: account?.email ?? null,
     users,
     data: account?.data ?? EMPTY,
     signIn,
@@ -379,14 +360,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     signOut: async () => {
       const a = accountRef.current;
       await push().catch(() => {});
-      await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
-      if (a) await AsyncStorage.removeItem(cacheKey(a.username)).catch(() => {});
+      await api('/api/auth/sign-out', { method: 'POST', body: {} }).catch(() => {});
+      if (a) await AsyncStorage.removeItem(cacheKey(a.email)).catch(() => {});
       clearSession();
     },
-    forgetUser: async (username) => {
-      await AsyncStorage.removeItem(cacheKey(username)).catch(() => {});
+    forgetUser: async (email) => {
+      await AsyncStorage.removeItem(cacheKey(email)).catch(() => {});
       setUsers((list) => {
-        const next = list.filter((u) => u.username !== username);
+        const next = list.filter((u) => u.email !== email);
         AsyncStorage.setItem(USERS_KEY, JSON.stringify(next)).catch(() => {});
         return next;
       });

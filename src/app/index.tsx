@@ -27,7 +27,7 @@ export default function Dashboard() {
   const {
     ready,
     data,
-    username,
+    email,
     addEntry,
     removeEntry,
     setDayClosed,
@@ -128,7 +128,7 @@ export default function Dashboard() {
                   size="sm"
                   onPress={() => setSettingsOpen(true)}
                   icon={<Icons.Settings size={14} color={Colors.textDim} />}>
-                  {compact ? '' : `@${username}`}
+                  {compact ? '' : email}
                 </Button>
               </View>
             </View>
@@ -238,7 +238,7 @@ export default function Dashboard() {
             </View>
 
             <T variant="caption" style={{ textAlign: 'center', paddingVertical: Spacing.three }}>
-              @{username}’s plan syncs to your account and works offline. Estimates use typical portion sizes and are approximate.
+              Your plan syncs to {email} and works offline. Estimates use typical portion sizes and are approximate.
             </T>
           </View>
         </ScrollView>

@@ -6,9 +6,8 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { Button, Icons, T } from '@/components/ui';
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
 import { api, ApiError } from '@/lib/api';
-import { normalizeUsername, useStore } from '@/lib/store';
-
-const MIN_PASSWORD = 8;
+import { MIN_PASSWORD, normalizeEmail } from '@/lib/email';
+import { useStore } from '@/lib/store';
 
 function lastSeen(ts: number) {
   const days = Math.floor((Date.now() - ts) / 86_400_000);
@@ -17,31 +16,62 @@ function lastSeen(ts: number) {
   return `active ${days} days ago`;
 }
 
-type Pending = { username: string; exists: boolean };
+type Mode = 'signIn' | 'signUp' | 'forgot';
+
+const COPY: Record<Mode, { title: string; body: string; submit: string }> = {
+  signIn: { title: 'Welcome back', body: 'Sign in to open your plan on this device.', submit: 'Sign in' },
+  signUp: {
+    title: 'Create your account',
+    body: `Use an email you can reach, so you can reset your password. At least ${MIN_PASSWORD} characters.`,
+    submit: 'Create account',
+  },
+  forgot: { title: 'Reset your password', body: 'We’ll email you a link to choose a new password.', submit: 'Send reset link' },
+};
 
 export default function Login() {
   const { ready, users, signIn, signUp, forgetUser } = useStore();
-  const [text, setText] = useState('');
-  const [pending, setPending] = useState<Pending | null>(null);
+  const [mode, setMode] = useState<Mode>('signIn');
+  const [emailText, setEmailText] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmForget, setConfirmForget] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   if (!ready) return <View style={styles.screen} />;
 
-  const name = normalizeUsername(text);
-  const recent = pending ? users.find((u) => u.username === pending.username) : undefined;
-  const mismatch = !!pending && !pending.exists && confirmPw.length > 0 && confirmPw !== password;
+  const email = normalizeEmail(emailText);
+  const mismatch = mode === 'signUp' && confirmPw.length > 0 && confirmPw !== password;
   const canSubmit =
-    !!pending && !busy && (pending.exists ? password.length > 0 : password.length >= MIN_PASSWORD && confirmPw === password);
+    !!email &&
+    !busy &&
+    (mode === 'forgot' ||
+      (mode === 'signIn' ? password.length > 0 : password.length >= MIN_PASSWORD && confirmPw === password));
 
-  const run = async (f: () => Promise<void>) => {
+  const switchTo = (next: Mode) => {
+    setMode(next);
+    setError(null);
+    setNotice(null);
+    setPassword('');
+    setConfirmPw('');
+  };
+
+  const submit = async () => {
+    if (!email || !canSubmit) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      await f();
+      if (mode === 'signIn') await signIn(email, password);
+      else if (mode === 'signUp') await signUp(email, password);
+      else {
+        await api('/api/auth/request-password-reset', {
+          method: 'POST',
+          body: { email, redirectTo: `${window.location.origin}/reset-password` },
+        });
+        // The same answer whether or not the account exists, so this can't be used to probe emails.
+        setNotice(`If ${email} has an account, a reset link is on its way. It expires in 15 minutes.`);
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Something went wrong. Try again.');
     } finally {
@@ -49,24 +79,7 @@ export default function Login() {
     }
   };
 
-  const choose = (username: string) =>
-    run(async () => {
-      const { exists } = await api<{ exists: boolean }>(`/api/auth/exists?username=${encodeURIComponent(username)}`);
-      setPending({ username, exists });
-      setPassword('');
-      setConfirmPw('');
-    });
-
-  const submit = () => {
-    if (!pending || !canSubmit) return;
-    run(() => (pending.exists ? signIn(pending.username, password) : signUp(pending.username, password)));
-  };
-
-  const back = () => {
-    setPending(null);
-    setError(null);
-    setConfirmForget(false);
-  };
+  const copy = COPY[mode];
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.screen}>
@@ -84,148 +97,134 @@ export default function Login() {
           <T variant="title">HealthOS</T>
         </View>
 
-        {!pending ? (
-          <>
-            <View style={{ gap: 4 }}>
-              <T variant="title" style={{ fontSize: 22 }}>
-                Who’s planning?
-              </T>
-              <T variant="body">Sign in or pick a username for a new account. Your plan syncs across your devices.</T>
-            </View>
+        <View style={{ gap: 4 }}>
+          <T variant="title" style={{ fontSize: 22 }}>
+            {copy.title}
+          </T>
+          <T variant="body">{copy.body}</T>
+        </View>
 
-            <View style={styles.inputWrap}>
-              <T variant="mono" color={Colors.textMuted} style={{ fontSize: 15 }}>
-                @
-              </T>
-              <TextInput
-                value={text}
-                onChangeText={setText}
-                placeholder="username"
-                placeholderTextColor={Colors.textMuted}
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoComplete="username"
-                autoFocus
-                style={styles.input}
-                onSubmitEditing={() => name && choose(name)}
-              />
-            </View>
-            {text.trim().length > 0 && !name && (
-              <T variant="caption" color={Colors.warn}>
-                2–24 characters: letters, numbers, dot, dash or underscore.
-              </T>
-            )}
-            {error && (
-              <T variant="caption" color={Colors.danger}>
-                {error}
-              </T>
-            )}
-            <Button kind="primary" disabled={!name || busy} onPress={() => name && choose(name)}>
-              Continue
-            </Button>
+        <View style={styles.inputWrap}>
+          <TextInput
+            value={emailText}
+            onChangeText={setEmailText}
+            placeholder="you@example.com"
+            placeholderTextColor={Colors.textMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="email"
+            keyboardType="email-address"
+            inputMode="email"
+            autoFocus
+            style={styles.input}
+            onSubmitEditing={submit}
+          />
+        </View>
 
-            {users.length > 0 && (
-              <View style={{ gap: Spacing.two }}>
-                <T variant="caption" style={styles.sectionLabel}>
-                  ON THIS DEVICE
-                </T>
-                {users.map((u) => (
-                  <Pressable
-                    key={u.username}
-                    onPress={() => choose(u.username)}
-                    style={(s) => [styles.user, (s as { hovered?: boolean }).hovered && { backgroundColor: Colors.surfaceHover }]}>
-                    <Avatar name={u.username} />
-                    <View style={{ flex: 1 }}>
-                      <T variant="label" color={Colors.text}>
-                        @{u.username}
-                      </T>
-                      <T variant="caption">{lastSeen(u.lastActiveAt)}</T>
-                    </View>
-                    <Icons.ChevronRight size={16} color={Colors.textMuted} />
-                  </Pressable>
-                ))}
+        {mode !== 'forgot' && (
+          <View style={styles.inputWrap}>
+            <TextInput
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Password"
+              placeholderTextColor={Colors.textMuted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoComplete={mode === 'signIn' ? 'current-password' : 'new-password'}
+              style={styles.input}
+              onSubmitEditing={submit}
+            />
+          </View>
+        )}
+        {mode === 'signUp' && (
+          <View style={styles.inputWrap}>
+            <TextInput
+              value={confirmPw}
+              onChangeText={setConfirmPw}
+              placeholder="Confirm password"
+              placeholderTextColor={Colors.textMuted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoComplete="new-password"
+              style={styles.input}
+              onSubmitEditing={submit}
+            />
+          </View>
+        )}
+
+        {emailText.trim().length > 3 && !email && (
+          <T variant="caption" color={Colors.warn}>
+            Enter a full email address.
+          </T>
+        )}
+        {mismatch && (
+          <T variant="caption" color={Colors.warn}>
+            Passwords don’t match.
+          </T>
+        )}
+        {error && (
+          <T variant="caption" color={Colors.danger}>
+            {error}
+          </T>
+        )}
+        {notice && (
+          <T variant="caption" color={Colors.accent}>
+            {notice}
+          </T>
+        )}
+
+        <Button kind="primary" disabled={!canSubmit} onPress={submit}>
+          {busy ? 'One moment…' : copy.submit}
+        </Button>
+
+        <View style={styles.links}>
+          {mode === 'signIn' ? (
+            <>
+              <LinkText onPress={() => switchTo('signUp')}>Create an account</LinkText>
+              <LinkText onPress={() => switchTo('forgot')}>Forgot password?</LinkText>
+            </>
+          ) : (
+            <LinkText onPress={() => switchTo('signIn')}>Back to sign in</LinkText>
+          )}
+        </View>
+
+        {mode === 'signIn' && users.length > 0 && (
+          <View style={{ gap: Spacing.two }}>
+            <T variant="caption" style={styles.sectionLabel}>
+              ON THIS DEVICE
+            </T>
+            {users.map((u) => (
+              <View key={u.email} style={styles.user}>
+                <Pressable onPress={() => setEmailText(u.email)} style={styles.userMain}>
+                  <Avatar name={u.email} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <T variant="label" color={Colors.text} numberOfLines={1}>
+                      {u.email}
+                    </T>
+                    <T variant="caption">{lastSeen(u.lastActiveAt)}</T>
+                  </View>
+                </Pressable>
+                <Pressable onPress={() => forgetUser(u.email)} hitSlop={8} accessibilityLabel={`Remove ${u.email} from this device`}>
+                  <T variant="caption" color={Colors.textMuted}>
+                    Remove
+                  </T>
+                </Pressable>
               </View>
-            )}
-          </>
-        ) : (
-          <>
-            <View style={styles.confirm}>
-              <Avatar name={pending.username} size={52} />
-              <View style={{ alignItems: 'center', gap: 4 }}>
-                <T variant="title" style={{ fontSize: 20 }}>
-                  {pending.exists ? `Welcome back, @${pending.username}` : `Create @${pending.username}`}
-                </T>
-                <T variant="body" style={{ textAlign: 'center' }}>
-                  {pending.exists
-                    ? 'Enter your password to open your plan.'
-                    : `Choose a password (at least ${MIN_PASSWORD} characters). You’ll use it to sign in on any device.`}
-                </T>
-              </View>
-            </View>
-
-            <View style={styles.inputWrap}>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Password"
-                placeholderTextColor={Colors.textMuted}
-                secureTextEntry
-                autoCapitalize="none"
-                autoComplete={pending.exists ? 'current-password' : 'new-password'}
-                autoFocus
-                style={styles.input}
-                onSubmitEditing={submit}
-              />
-            </View>
-            {!pending.exists && (
-              <View style={styles.inputWrap}>
-                <TextInput
-                  value={confirmPw}
-                  onChangeText={setConfirmPw}
-                  placeholder="Confirm password"
-                  placeholderTextColor={Colors.textMuted}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoComplete="new-password"
-                  style={styles.input}
-                  onSubmitEditing={submit}
-                />
-              </View>
-            )}
-            {mismatch && (
-              <T variant="caption" color={Colors.warn}>
-                Passwords don’t match.
-              </T>
-            )}
-            {error && (
-              <T variant="caption" color={Colors.danger}>
-                {error}
-              </T>
-            )}
-
-            <Button kind="primary" disabled={!canSubmit} onPress={submit}>
-              {busy ? 'One moment…' : pending.exists ? 'Sign in' : 'Create account'}
-            </Button>
-            <Button kind="ghost" onPress={back}>
-              {pending.exists ? 'Not you? Use another name' : 'Use a different name'}
-            </Button>
-            {recent && (
-              <Pressable
-                onPress={async () => {
-                  if (!confirmForget) return setConfirmForget(true);
-                  await forgetUser(pending.username);
-                  back();
-                }}
-                style={{ alignSelf: 'center', padding: 6 }}>
-                <T variant="caption" color={confirmForget ? Colors.danger : Colors.textMuted}>
-                  {confirmForget ? 'Tap again to remove it from this device' : 'Remove from this device'}
-                </T>
-              </Pressable>
-            )}
-          </>
+            ))}
+          </View>
         )}
       </View>
     </KeyboardAvoidingView>
+  );
+}
+
+function LinkText({ children, onPress }: { children: string; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} hitSlop={6}>
+      <T variant="caption" color={Colors.accent}>
+        {children}
+      </T>
+    </Pressable>
   );
 }
 
@@ -281,6 +280,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     outlineWidth: 0,
   },
+  links: { flexDirection: 'row', justifyContent: 'space-between' },
   sectionLabel: { fontWeight: '600', letterSpacing: 0.8, fontSize: 10.5, marginTop: Spacing.two },
   user: {
     flexDirection: 'row',
@@ -292,6 +292,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     backgroundColor: Colors.surfaceRaised,
   },
+  userMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.three, minWidth: 0 },
   avatar: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -299,5 +300,4 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.accentBorder,
   },
-  confirm: { alignItems: 'center', gap: Spacing.three, paddingVertical: Spacing.two },
 });

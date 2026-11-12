@@ -22,7 +22,21 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   } catch {
     throw new ApiError('You’re offline', 0);
   }
-  const body = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
-  if (!res.ok) throw new ApiError(body?.error ?? `Request failed (${res.status})`, res.status, body);
+  const body = (await res.json().catch(() => null)) as (T & { error?: string; message?: string; code?: string }) | null;
+  if (!res.ok) {
+    const message = (body?.code && FRIENDLY[body.code]) ?? body?.error ?? body?.message ?? `Request failed (${res.status})`;
+    throw new ApiError(message, res.status, body);
+  }
   return body as T;
 }
+
+/** Neon Auth error codes worth rewording for people. */
+const FRIENDLY: Record<string, string> = {
+  INVALID_EMAIL_OR_PASSWORD: 'Wrong email or password.',
+  USER_ALREADY_EXISTS: 'An account with this email already exists. Sign in instead.',
+  USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: 'An account with this email already exists. Sign in instead.',
+  INVALID_EMAIL: 'That doesn’t look like an email address.',
+  PASSWORD_TOO_SHORT: 'That password is too short.',
+  PASSWORD_TOO_LONG: 'That password is too long.',
+  INVALID_TOKEN: 'This reset link is invalid or has expired. Request a new one.',
+};

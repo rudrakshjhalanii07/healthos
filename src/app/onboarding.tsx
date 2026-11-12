@@ -54,7 +54,7 @@ function sanitize(prefs: Prefs): Prefs {
 }
 
 export default function Onboarding() {
-  const { ready, data, username, saveProfile } = useStore();
+  const { ready, data, email, saveProfile } = useStore();
   const editing = !!data.profile;
   const [step, setStep] = useState(0);
   const [profile, setProfile] = useState<Profile>(data.profile ?? DEFAULT_PROFILE);
@@ -97,7 +97,7 @@ export default function Onboarding() {
           <View style={styles.header}>
             <View style={styles.headerRow}>
               <T variant="caption">
-                @{username} · {STEPS[step]}
+                {email} · {STEPS[step]}
               </T>
               {editing && (
                 <IconButton label="Cancel editing" onPress={() => router.replace('/')}>

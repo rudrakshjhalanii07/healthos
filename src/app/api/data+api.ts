@@ -1,4 +1,5 @@
-import { currentUser, json, readJSON, unauthorized } from '@/server/auth';
+import { json, readJSON, unauthorized } from '@/server/http';
+import { currentUser } from '@/server/neon-auth';
 import { db } from '@/server/db';
 
 const MAX_BYTES = 1_000_000;
@@ -39,9 +40,11 @@ export async function PUT(request: Request) {
   }
 
   // Only lands if nobody else saved since this client last read; otherwise hand back the newer copy.
+  // The row is created by the user's first save.
   const rows = await db()`
-    update user_data set data = ${JSON.stringify(body.data)}::jsonb, version = version + 1, updated_at = now()
-    where user_id = ${user.id} and version = ${body.baseVersion!}
+    insert into user_data (user_id, data, version) values (${user.id}, ${JSON.stringify(body.data)}::jsonb, 1)
+    on conflict (user_id) do update set data = excluded.data, version = user_data.version + 1, updated_at = now()
+    where user_data.version = ${body.baseVersion!}
     returning version`;
   const saved = rows[0] as { version: number } | undefined;
   if (saved) return json({ version: saved.version });

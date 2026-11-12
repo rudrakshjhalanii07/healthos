@@ -30,7 +30,7 @@ export function SettingsModal({ visible, onClose }: { visible: boolean; onClose:
 }
 
 function SettingsForm({ onClose }: { onClose: () => void }) {
-  const { data, username, updateSettings, updatePrefs, resetAll, signOut } = useStore();
+  const { data, email, updateSettings, updatePrefs, resetAll, signOut } = useStore();
   const theme = useThemeMode();
   const recommended = data.profile ? (data.learned?.dailyTarget ?? energyPlan(data.profile).target) * 7 : null;
   const [draft, setDraft] = useState<Settings>(data.settings);
@@ -60,7 +60,7 @@ function SettingsForm({ onClose }: { onClose: () => void }) {
         <View style={styles.profile}>
           <View style={{ flex: 1, gap: 2 }}>
             <T variant="label" color={Colors.text}>
-              @{username}
+              {email}
             </T>
             <T variant="caption">Measurements, goal, diet and allergies.</T>
           </View>

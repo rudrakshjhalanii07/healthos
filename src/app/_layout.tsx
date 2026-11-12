@@ -18,7 +18,7 @@ export default function RootLayout() {
 }
 
 function RootNavigator() {
-  const { ready, username, data } = useStore();
+  const { ready, email, data } = useStore();
   const { resolved } = useThemeMode();
   if (ready) SplashScreen.hide();
 
@@ -30,8 +30,8 @@ function RootNavigator() {
 
   // Until storage has loaded, leave every route open so nothing redirects prematurely;
   // screens render blank while `ready` is false.
-  const signedIn = !ready || !!username;
-  const onboarded = !ready || (!!username && !!data.profile);
+  const signedIn = !ready || !!email;
+  const onboarded = !ready || (!!email && !!data.profile);
 
   return (
     <ThemeProvider value={navTheme}>
@@ -44,9 +44,11 @@ function RootNavigator() {
         <Stack.Protected guard={signedIn}>
           <Stack.Screen name="onboarding" />
         </Stack.Protected>
-        <Stack.Protected guard={!ready || !username}>
+        <Stack.Protected guard={!ready || !email}>
           <Stack.Screen name="login" />
         </Stack.Protected>
+        {/* Reached from an emailed link, signed in or not. */}
+        <Stack.Screen name="reset-password" />
       </Stack>
     </ThemeProvider>
   );
