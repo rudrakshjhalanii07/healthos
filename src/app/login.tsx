@@ -17,7 +17,7 @@ function lastSeen(ts: number) {
   return `active ${days} days ago`;
 }
 
-type Mode = 'signIn' | 'signUp' | 'forgot';
+type Mode = 'signIn' | 'signUp' | 'forgot' | 'verify';
 
 const COPY: Record<Mode, { title: string; body: string; submit: string }> = {
   signIn: { title: 'Welcome back', body: 'Sign in to open your plan on this device.', submit: 'Sign in' },
@@ -27,10 +27,12 @@ const COPY: Record<Mode, { title: string; body: string; submit: string }> = {
     submit: 'Create account',
   },
   forgot: { title: 'Reset your password', body: 'We’ll email you a link to choose a new password.', submit: 'Send reset link' },
+  verify: { title: 'Check your email', body: 'Enter the 6-digit code we sent to confirm it’s your address.', submit: 'Verify and continue' },
 };
 
 export default function Login() {
-  const { ready, users, signIn, signUp, forgetUser } = useStore();
+  const { ready, users, signIn, signUp, forgetUser, sendVerificationCode, verifyEmail } = useStore();
+  const [code, setCode] = useState('');
   const [mode, setMode] = useState<Mode>('signIn');
   const [emailText, setEmailText] = useState('');
   const [password, setPassword] = useState('');
@@ -47,7 +49,17 @@ export default function Login() {
     !!email &&
     !busy &&
     (mode === 'forgot' ||
-      (mode === 'signIn' ? password.length > 0 : password.length >= MIN_PASSWORD && confirmPw === password));
+      (mode === 'verify' && /^\d{6}$/.test(code.trim())) ||
+      (mode === 'signIn' && password.length > 0) ||
+      (mode === 'signUp' && password.length >= MIN_PASSWORD && confirmPw === password));
+
+  const startVerify = async (address: string, send: boolean) => {
+    setMode('verify');
+    setCode('');
+    setError(null);
+    if (send) await sendVerificationCode(address).catch(() => {});
+    setNotice(`Code sent to ${address}. It may take a minute; check spam too.`);
+  };
 
   const switchTo = (next: Mode) => {
     setMode(next);
@@ -64,7 +76,10 @@ export default function Login() {
     setNotice(null);
     try {
       if (mode === 'signIn') await signIn(email, password);
-      else if (mode === 'signUp') await signUp(email, password);
+      else if (mode === 'signUp') {
+        // Sign-up already emails the first code when verification is on.
+        if ((await signUp(email, password)) === 'verify') await startVerify(email, false);
+      } else if (mode === 'verify') await verifyEmail(email, code, password);
       else {
         await api('/api/auth/request-password-reset', {
           method: 'POST',
@@ -74,7 +89,9 @@ export default function Login() {
         setNotice(`If ${email} has an account, a reset link is on its way. It expires in 15 minutes.`);
       }
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Something went wrong. Try again.');
+      const unverified = e instanceof ApiError && (e.body as { code?: string } | null)?.code === 'EMAIL_NOT_VERIFIED';
+      if (unverified && mode === 'signIn') await startVerify(email, true);
+      else setError(e instanceof ApiError ? e.message : 'Something went wrong. Try again.');
     } finally {
       setBusy(false);
     }
@@ -116,13 +133,32 @@ export default function Login() {
             autoComplete="email"
             keyboardType="email-address"
             inputMode="email"
-            autoFocus
-            style={styles.input}
+            autoFocus={mode !== 'verify'}
+            editable={mode !== 'verify'}
+            style={[styles.input, mode === 'verify' && { color: Colors.textMuted }]}
             onSubmitEditing={submit}
           />
         </View>
 
-        {mode !== 'forgot' && (
+        {mode === 'verify' && (
+          <View style={styles.inputWrap}>
+            <TextInput
+              value={code}
+              onChangeText={(t) => setCode(t.replace(/\D/g, '').slice(0, 6))}
+              placeholder="6-digit code"
+              placeholderTextColor={Colors.textMuted}
+              keyboardType="number-pad"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              textContentType="oneTimeCode"
+              autoFocus
+              style={[styles.input, { letterSpacing: 4 }]}
+              onSubmitEditing={submit}
+            />
+          </View>
+        )}
+
+        {(mode === 'signIn' || mode === 'signUp') && (
           <View style={styles.inputWrap}>
             <TextInput
               value={password}
@@ -183,6 +219,11 @@ export default function Login() {
             <>
               <LinkText onPress={() => switchTo('signUp')}>Create an account</LinkText>
               <LinkText onPress={() => switchTo('forgot')}>Forgot password?</LinkText>
+            </>
+          ) : mode === 'verify' ? (
+            <>
+              <LinkText onPress={() => email && startVerify(email, true)}>Send a new code</LinkText>
+              <LinkText onPress={() => switchTo('signIn')}>Back to sign in</LinkText>
             </>
           ) : (
             <LinkText onPress={() => switchTo('signIn')}>Back to sign in</LinkText>

@@ -1,12 +1,16 @@
 import Head from 'expo-router/head';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, TextInput, View } from 'react-native';
 
 import { Button, Icons, T } from '@/components/ui';
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
 import { api, ApiError } from '@/lib/api';
 import { MIN_PASSWORD } from '@/lib/email';
+
+const noop = () => () => {};
+/** False while prerendering and hydrating, true after: the URL's token only exists in the browser. */
+const useInBrowser = () => useSyncExternalStore(noop, () => true, () => false);
 
 // The emailed reset link goes to Neon Auth, which sends the user here with `?token=…`,
 // or with `?error=INVALID_TOKEN` when the link is bad or expired.
@@ -18,6 +22,7 @@ export default function ResetPassword() {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
+  const inBrowser = useInBrowser();
   const usable = !!token && !linkError;
   const mismatch = confirmPw.length > 0 && confirmPw !== password;
   const canSubmit = usable && !busy && password.length >= MIN_PASSWORD && confirmPw === password;
@@ -49,7 +54,7 @@ export default function ResetPassword() {
           <T variant="title">HealthOS</T>
         </View>
 
-        {done ? (
+        {!inBrowser ? null : done ? (
           <>
             <T variant="title" style={{ fontSize: 22 }}>
               Password updated

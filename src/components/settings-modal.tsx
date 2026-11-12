@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { type ReactNode, useState } from 'react';
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { Badge, Button, IconButton, Icons, Segmented, T } from './ui';
 
@@ -284,9 +284,12 @@ function Field({
   );
 }
 
+const FEEDBACK_URL = `mailto:rudrakshjhalanii@gmail.com?subject=${encodeURIComponent('HealthOS feedback')}`;
+
 /** Download and permanent deletion of the account's data, plus the privacy page. */
 function AccountSection({ onClose }: { onClose: () => void }) {
-  const { exportData, deleteAccount } = useStore();
+  const { exportData, deleteAccount, signOutEverywhere } = useStore();
+  const [confirmEverywhere, setConfirmEverywhere] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -334,6 +337,30 @@ function AccountSection({ onClose }: { onClose: () => void }) {
         </View>
         <Button size="sm" onPress={download}>
           Download
+        </Button>
+      </View>
+
+      <View style={[styles.profile, { gap: Spacing.two }]}>
+        <View style={{ flex: 1, gap: 2, minWidth: 180 }}>
+          <T variant="label" color={Colors.text}>
+            Sign out of all devices
+          </T>
+          <T variant="caption">Ends every session, including this one. Use it if you’ve lost a device or shared your password.</T>
+        </View>
+        <Button
+          size="sm"
+          onPress={async () => {
+            if (!confirmEverywhere) return setConfirmEverywhere(true);
+            setError(null);
+            try {
+              await signOutEverywhere();
+              onClose();
+            } catch (e) {
+              setConfirmEverywhere(false);
+              setError(e instanceof ApiError ? e.message : 'Couldn’t sign out other devices. Try again.');
+            }
+          }}>
+          {confirmEverywhere ? 'Tap again to confirm' : 'Sign out everywhere'}
         </Button>
       </View>
 
@@ -388,16 +415,23 @@ function AccountSection({ onClose }: { onClose: () => void }) {
           {error}
         </T>
       )}
-      <Pressable
-        onPress={() => {
-          onClose();
-          router.push('/privacy');
-        }}
-        hitSlop={6}>
-        <T variant="caption" color={Colors.accent}>
-          Privacy policy & health disclaimer
-        </T>
-      </Pressable>
+      <View style={{ flexDirection: 'row', gap: Spacing.four, flexWrap: 'wrap' }}>
+        <Pressable
+          onPress={() => {
+            onClose();
+            router.push('/privacy');
+          }}
+          hitSlop={6}>
+          <T variant="caption" color={Colors.accent}>
+            Privacy policy & health disclaimer
+          </T>
+        </Pressable>
+        <Pressable onPress={() => Linking.openURL(FEEDBACK_URL)} hitSlop={6}>
+          <T variant="caption" color={Colors.accent}>
+            Send feedback or report a bug
+          </T>
+        </Pressable>
+      </View>
     </Field>
   );
 }

@@ -166,15 +166,26 @@ function merge(local: Data, server: Data, removed: Set<string>): Data {
 
 type Account = { email: string; data: Data };
 
+/** Whether this device's changes have reached the server. */
+export type SyncStatus = 'saved' | 'pending' | 'saving' | 'offline' | 'error';
+
 type Store = {
   ready: boolean;
   email: string | null;
+  syncStatus: SyncStatus;
   users: UserMeta[];
   data: Data;
   /** Throws an `ApiError` with a user-facing message on failure. */
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
+  /** Resolves to 'verify' when the account must confirm its email (with a code) before signing in. */
+  signUp: (email: string, password: string) => Promise<'signedIn' | 'verify'>;
+  /** Emails a fresh 6-digit verification code. */
+  sendVerificationCode: (email: string) => Promise<void>;
+  /** Confirms the emailed code, then signs in (with the password if the server didn't already). */
+  verifyEmail: (email: string, code: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /** Ends every session for this account, on all devices, then signs out here. */
+  signOutEverywhere: () => Promise<void>;
   forgetUser: (email: string) => Promise<void>;
   /** Permanently deletes the account and all its data. Throws an `ApiError` (e.g. wrong password). */
   deleteAccount: (password: string) => Promise<void>;
@@ -201,6 +212,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [account, setAccount] = useState<Account | null>(null);
   const [users, setUsers] = useState<UserMeta[]>([]);
   const [ready, setReady] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('saved');
 
   // Sync bookkeeping lives in refs: it changes on every save and nothing renders from it.
   const accountRef = useRef<Account | null>(null);
@@ -225,6 +237,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     sync.current = FRESH;
     AsyncStorage.removeItem(SESSION_KEY).catch(() => {});
     setAccount(null);
+    setSyncStatus('saved');
   };
 
   /** Saves local changes; on a version conflict merges with the server copy and tries again. */
@@ -232,6 +245,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const a = accountRef.current;
     if (!a || !sync.current.dirty || pushing.current) return;
     pushing.current = true;
+    setSyncStatus('saving');
     const sent = a.data;
     try {
       const { version } = await api<{ version: number }>('/api/data', {
@@ -242,9 +256,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const unchanged = accountRef.current?.data === sent;
       sync.current = unchanged ? { ...FRESH, version } : { ...sync.current, version };
       if (accountRef.current) persist(accountRef.current);
+      setSyncStatus(sync.current.dirty ? 'pending' : 'saved');
     } catch (e) {
       const status = e instanceof ApiError ? e.status : -1;
       if (status === 401) clearSession();
+      else if (status !== 409) {
+        setSyncStatus(status === 0 ? 'offline' : 'error');
+        console.error('HealthOS sync failed', e);
+      }
       // Offline or a server error: stay dirty and retry on the next change, focus or reconnect.
       if (status !== 409) return;
       // Another device saved first: fold its copy in, then save the result on top of its version.
@@ -276,10 +295,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (sync.current.dirty) await push();
   };
 
-  /** Opens a signed-in user from this device's cache, then refreshes from the server. */
-  const open = async (email: string) => {
+  /**
+   * Opens a signed-in user from this device's cache, then refreshes from the server. With
+   * `wait: false` a cached copy is shown at once and the refresh finishes in the background,
+   * so a slow or sleeping server never holds up opening the app.
+   */
+  const open = async (email: string, { wait = true } = {}) => {
     const cached = await readJSON<Cache | null>(cacheKey(email), null);
     sync.current = cached?.sync ?? FRESH;
+    setSyncStatus(sync.current.dirty ? 'pending' : 'saved');
     show({ email, data: hydrate(cached?.data ?? null) });
     await AsyncStorage.setItem(SESSION_KEY, email).catch(() => {});
 
@@ -294,9 +318,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return next;
     });
 
-    await pull(email).catch((e) => {
+    const refreshed = pull(email).catch((e) => {
       if (e instanceof ApiError && e.status === 401) clearSession();
+      else if (e instanceof ApiError && e.status === 0) setSyncStatus('offline');
     });
+    if (wait || !cached) await refreshed;
   };
 
   type AuthResponse = { user: { email: string } };
@@ -309,14 +335,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     await open(user.email);
   };
 
-  const signUp = async (raw: string, password: string) => {
+  const hasSession = async () => !!(await api<{ session?: unknown } | null>('/api/auth/get-session'))?.session;
+
+  const signUp = async (raw: string, password: string): Promise<'signedIn' | 'verify'> => {
     const { user } = await api<AuthResponse>('/api/auth/sign-up/email', {
       method: 'POST',
       body: { email: raw, password, name: raw.split('@')[0] },
     });
     // A fresh account: don't carry over anything a previous account with this email left on the device.
     await AsyncStorage.removeItem(cacheKey(user.email)).catch(() => {});
+    // With email verification on, sign-up creates the account but no session until the code is entered.
+    if (!(await hasSession())) return 'verify';
     await open(user.email);
+    return 'signedIn';
+  };
+
+  const sendVerificationCode = async (email: string) => {
+    await api('/api/auth/email-otp/send-verification-otp', { method: 'POST', body: { email, type: 'email-verification' } });
+  };
+
+  const verifyEmail = async (email: string, code: string, password: string) => {
+    await api('/api/auth/email-otp/verify-email', { method: 'POST', body: { email, otp: code.trim() } });
+    if (await hasSession()) await open(email);
+    else await signIn(email, password);
   };
 
   useEffect(() => {
@@ -325,7 +366,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setUsers((await readJSON<UserMeta[]>(USERS_KEY, [])).filter((u) => u.email));
       const session = await AsyncStorage.getItem(SESSION_KEY).catch(() => null);
       // An expired session is detected by the first server call, which then signs out.
-      if (session) await open(session);
+      if (session) await open(session, { wait: false });
     })()
       .catch(() => {})
       .finally(() => setReady(true));
@@ -351,20 +392,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       removed: removed ? [...sync.current.removed, removed] : sync.current.removed,
     };
     show({ ...a, data: f(a.data) });
+    setSyncStatus('pending');
     schedulePush();
   };
 
   const store: Store = {
     ready,
     email: account?.email ?? null,
+    syncStatus,
     users,
     data: account?.data ?? EMPTY,
     signIn,
     signUp,
+    sendVerificationCode,
+    verifyEmail,
     signOut: async () => {
       const a = accountRef.current;
       await push().catch(() => {});
       await api('/api/auth/sign-out', { method: 'POST', body: {} }).catch(() => {});
+      if (a) await AsyncStorage.removeItem(cacheKey(a.email)).catch(() => {});
+      clearSession();
+    },
+    signOutEverywhere: async () => {
+      const a = accountRef.current;
+      await push().catch(() => {});
+      // Unlike sign-out, a failure here must surface: the user is relying on other devices losing access.
+      await api('/api/auth/revoke-sessions', { method: 'POST', body: {} });
       if (a) await AsyncStorage.removeItem(cacheKey(a.email)).catch(() => {});
       clearSession();
     },

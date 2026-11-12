@@ -10,6 +10,7 @@ import { MacroCard } from '@/components/macro-card';
 import { CalibrationCard, ProposalCard, WeightCard } from '@/components/plan-cards';
 import { Ring } from '@/components/ring';
 import { SettingsModal } from '@/components/settings-modal';
+import { SyncBadge } from '@/components/sync-badge';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Badge, Button, Card, CardHeader, IconButton, Icons, ProgressBar, T } from '@/components/ui';
 import { WeekStrip } from '@/components/week-strip';
@@ -123,6 +124,7 @@ export default function Dashboard() {
                     This week
                   </Button>
                 )}
+                <SyncBadge compact={compact} />
                 <ThemeToggle />
                 <Button
                   size="sm"

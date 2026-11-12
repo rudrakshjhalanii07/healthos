@@ -9,6 +9,8 @@ export class ApiError extends Error {
   }
 }
 
+const TIMEOUT_MS = 20_000;
+
 /** JSON fetch against this app's own API routes, sending the session cookie. */
 export async function api<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
   let res: Response;
@@ -18,8 +20,13 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
       credentials: 'include',
       headers: init.body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
       body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+      // The database sleeps when idle and can take a few seconds to wake; past this, give up.
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-  } catch {
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'TimeoutError') {
+      throw new ApiError('The server is taking too long. Check your connection and try again.', 0);
+    }
     throw new ApiError('You’re offline', 0);
   }
   const body = (await res.json().catch(() => null)) as (T & { error?: string; message?: string; code?: string }) | null;
@@ -43,4 +50,8 @@ const FRIENDLY: Record<string, string> = {
   PASSWORD_TOO_SHORT: 'That password is too short.',
   PASSWORD_TOO_LONG: 'That password is too long.',
   INVALID_TOKEN: 'This reset link is invalid or has expired. Request a new one.',
+  EMAIL_NOT_VERIFIED: 'Verify your email first. We’ve sent you a new code.',
+  INVALID_OTP: 'That code isn’t right. Check the email and try again.',
+  OTP_EXPIRED: 'That code has expired. Send a new one.',
+  TOO_MANY_ATTEMPTS: 'Too many wrong codes. Send a new one.',
 };

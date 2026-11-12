@@ -11,6 +11,9 @@ const ALLOWED: Record<string, 'GET' | 'POST'> = {
   'request-password-reset': 'POST',
   'reset-password': 'POST',
   'change-password': 'POST',
+  'revoke-sessions': 'POST',
+  'email-otp/send-verification-otp': 'POST',
+  'email-otp/verify-email': 'POST',
 };
 
 const MAX_BODY = 16_384;
