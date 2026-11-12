@@ -12,6 +12,7 @@ import {
   type Allergy,
   cmToFtIn,
   DEFAULT_PREFS,
+  bmiOf,
   DEFAULT_PROFILE,
   energyPlan,
   formulaMaintenance,
@@ -19,6 +20,9 @@ import {
   type GlutenAlt,
   kgToLb,
   lbToKg,
+  MIN_AGE,
+  MIN_BMI,
+  minHealthyKg,
   type MilkAlt,
   type Prefs,
   type Profile,
@@ -71,14 +75,15 @@ export default function Onboarding() {
   const setP = (patch: Partial<Profile>) => setProfile((p) => ({ ...p, ...patch }));
   const setF = (patch: Partial<Prefs>) => setPrefs((p) => sanitize({ ...p, ...patch }));
   const bodyValid =
-    profile.age >= 14 &&
+    profile.age >= MIN_AGE &&
     profile.age <= 90 &&
     profile.heightCm >= 120 &&
     profile.heightCm <= 230 &&
     profile.weightKg >= 35 &&
     profile.weightKg <= 250 &&
     (profile.knownMaintenance == null || (profile.knownMaintenance >= 1000 && profile.knownMaintenance <= 6000));
-  const valid = [bodyValid, profile.goal === 'maintain' || profile.ratePerWeekKg > 0, true, true][step];
+  const goalValid = profile.goal === 'maintain' || (profile.ratePerWeekKg > 0 && !goalProblem(profile));
+  const valid = [bodyValid, goalValid, true, true][step];
   // Editing skips the explainer — they've seen it.
   const last = editing ? 2 : STEPS.length - 1;
 
@@ -186,6 +191,11 @@ function YouStep({ profile, set }: ProfileStepProps) {
       <View style={styles.row} key={profile.units}>
         <Field label="Age" style={styles.fill}>
           <NumberField value={profile.age} onChange={(v) => set({ age: v ?? 0 })} suffix="yrs" />
+          {profile.age > 0 && profile.age < MIN_AGE && (
+            <T variant="caption" color={Colors.warn}>
+              HealthOS is for adults ({MIN_AGE}+). Calorie targets for teens should come from a doctor.
+            </T>
+          )}
         </Field>
         <Field label="Height" style={[styles.fill, { flexGrow: 1.4 }]}>
           {imperial ? (
@@ -221,6 +231,19 @@ function YouStep({ profile, set }: ProfileStepProps) {
       </Field>
     </>
   );
+}
+
+/** Why a weight-loss goal can't be planned, or null if it can. */
+function goalProblem(p: Profile): string | null {
+  if (p.goal !== 'lose') return null;
+  if (bmiOf(p.weightKg, p.heightCm) < MIN_BMI) {
+    return 'Your current weight is already below a healthy BMI, so HealthOS won’t plan weight loss. Choose Maintain or Bulk, and consider talking to a doctor.';
+  }
+  if (p.targetWeightKg != null && p.targetWeightKg < minHealthyKg(p.heightCm)) {
+    const min = p.units === 'imperial' ? `${Math.ceil(kgToLb(minHealthyKg(p.heightCm)))} lb` : `${minHealthyKg(p.heightCm)} kg`;
+    return `That goal weight is below a healthy BMI for your height. The lowest goal HealthOS will plan for is ${min}.`;
+  }
+  return null;
 }
 
 const RATES = {
@@ -301,6 +324,11 @@ function GoalStep({ profile, set }: ProfileStepProps) {
           </T>
         )}
       </View>
+      {goalProblem(profile) && (
+        <T variant="caption" color={Colors.warn}>
+          {goalProblem(profile)}
+        </T>
+      )}
     </>
   );
 }

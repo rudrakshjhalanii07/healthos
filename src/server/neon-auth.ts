@@ -33,3 +33,8 @@ export async function currentUser(request: Request): Promise<SessionUser | null>
   cache.set(cookie, { user, until: Date.now() + TTL_MS });
   return user;
 }
+
+/** Drops this request's cached session, e.g. once its user is deleted. */
+export function forgetSession(request: Request) {
+  cache.delete(request.headers.get('cookie') ?? '');
+}

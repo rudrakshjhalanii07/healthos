@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import Head from 'expo-router/head';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -214,6 +215,11 @@ export default function Login() {
           </View>
         )}
       </View>
+      <Pressable onPress={() => router.push('/privacy')} hitSlop={6} style={styles.footer}>
+        <T variant="caption" style={{ textAlign: 'center' }}>
+          Not medical advice. For healthy adults 18+. <T variant="caption" color={Colors.accent}>Privacy & disclaimer</T>
+        </T>
+      </Pressable>
     </KeyboardAvoidingView>
   );
 }
@@ -281,6 +287,7 @@ const styles = StyleSheet.create({
     outlineWidth: 0,
   },
   links: { flexDirection: 'row', justifyContent: 'space-between' },
+  footer: { marginTop: Spacing.three, maxWidth: 380 },
   sectionLabel: { fontWeight: '600', letterSpacing: 0.8, fontSize: 10.5, marginTop: Spacing.two },
   user: {
     flexDirection: 'row',

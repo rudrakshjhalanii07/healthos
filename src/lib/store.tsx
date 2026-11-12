@@ -176,6 +176,10 @@ type Store = {
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   forgetUser: (email: string) => Promise<void>;
+  /** Permanently deletes the account and all its data. Throws an `ApiError` (e.g. wrong password). */
+  deleteAccount: (password: string) => Promise<void>;
+  /** The server's copy of the signed-in user's data, for download. */
+  exportData: () => Promise<{ exportedAt: string; email: string; data: Partial<Data> | null }>;
   saveProfile: (profile: Profile, prefs: Prefs) => void;
   updatePrefs: (patch: Partial<Prefs>) => void;
   addWeighIn: (date: DateKey, kg: number) => void;
@@ -363,6 +367,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await api('/api/auth/sign-out', { method: 'POST', body: {} }).catch(() => {});
       if (a) await AsyncStorage.removeItem(cacheKey(a.email)).catch(() => {});
       clearSession();
+    },
+    deleteAccount: async (password) => {
+      const a = accountRef.current;
+      await api('/api/account', { method: 'DELETE', body: { password } });
+      if (a) await store.forgetUser(a.email);
+      clearSession();
+    },
+    exportData: async () => {
+      const a = accountRef.current;
+      if (!a) throw new ApiError('Not signed in', 401);
+      // Save anything pending first so the download matches what's on screen.
+      await push().catch(() => {});
+      const { data } = await api<{ data: Partial<Data> | null }>('/api/data');
+      return { exportedAt: new Date().toISOString(), email: a.email, data };
     },
     forgetUser: async (email) => {
       await AsyncStorage.removeItem(cacheKey(email)).catch(() => {});

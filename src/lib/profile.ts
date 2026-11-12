@@ -90,7 +90,17 @@ export const ACTIVITY_FACTOR: Record<ActivityLevel, number> = {
 export const KCAL_PER_KG = 7700;
 const round10 = (n: number) => Math.round(n / 10) * 10;
 
+/** Lowest average daily target the app will plan for (common clinical guidance for unsupervised dieting). */
 export const safeFloor = (sex: Sex) => (sex === 'female' ? 1200 : 1500);
+/** Lowest any single day may go, e.g. while repaying an overage. */
+export const dayFloor = (sex: Sex) => (sex === 'female' ? 1000 : 1200);
+
+/** Below this BMI the app won't plan weight loss or accept a lower goal weight. */
+export const MIN_BMI = 18.5;
+export const bmiOf = (kg: number, heightCm: number) => kg / (heightCm / 100) ** 2;
+/** Lowest goal weight the app accepts for a height, in kg (rounded up to 0.1). */
+export const minHealthyKg = (heightCm: number) => Math.ceil(MIN_BMI * (heightCm / 100) ** 2 * 10) / 10;
+export const MIN_AGE = 18;
 
 export const bmr = (p: Profile) => 10 * p.weightKg + 6.25 * p.heightCm - 5 * p.age + (p.sex === 'male' ? 5 : -161);
 export const formulaMaintenance = (p: Profile) => round10(bmr(p) * ACTIVITY_FACTOR[p.activity]);
@@ -167,7 +177,7 @@ export function macroConfig(p: Profile, learnedFatPct?: number | null): MacroCon
 /** Daily floor/ceiling around a target. Single days may dip lower to repay an overage. */
 export function dailyBounds(p: Profile, target: number) {
   return {
-    minDaily: round10(Math.max(p.sex === 'female' ? 1000 : 1200, target * 0.7)),
+    minDaily: round10(Math.max(dayFloor(p.sex), target * 0.7)),
     maxDaily: round10(target * 1.8),
   };
 }

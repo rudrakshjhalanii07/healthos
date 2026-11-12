@@ -49,6 +49,7 @@ function RootNavigator() {
         </Stack.Protected>
         {/* Reached from an emailed link, signed in or not. */}
         <Stack.Screen name="reset-password" />
+        <Stack.Screen name="privacy" />
       </Stack>
     </ThemeProvider>
   );

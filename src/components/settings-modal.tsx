@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { type ReactNode, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { Badge, Button, IconButton, Icons, Segmented, T } from './ui';
 
@@ -9,8 +9,9 @@ import { TreatsEditor } from './treats-editor';
 
 import { DAY_TYPE_STYLE, NEXT_DAY_TYPE } from '@/constants/day-types';
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
+import { ApiError } from '@/lib/api';
 import { classifyWeight, DAY_WEIGHT } from '@/lib/planner';
-import { energyPlan } from '@/lib/profile';
+import { dayFloor, energyPlan, safeFloor } from '@/lib/profile';
 import { CAN_SWITCH_LIVE, useThemeMode } from '@/lib/theme-mode';
 import { type Settings, useStore } from '@/lib/store';
 
@@ -37,9 +38,13 @@ function SettingsForm({ onClose }: { onClose: () => void }) {
   const [confirmReset, setConfirmReset] = useState(false);
 
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setDraft((d) => ({ ...d, [k]: v }));
+  // Without a profile, fall back to the lower (female) limits rather than blocking the form.
+  const sex = data.profile?.sex ?? 'female';
+  const weeklyMin = safeFloor(sex) * 7;
+  const dailyMin = dayFloor(sex);
   const valid =
-    draft.weeklyGoal >= 3500 &&
-    draft.minDaily >= 800 &&
+    draft.weeklyGoal >= weeklyMin &&
+    draft.minDaily >= dailyMin &&
     draft.maxDaily > draft.minDaily &&
     draft.minDaily * 7 <= draft.weeklyGoal &&
     draft.maxDaily * 7 >= draft.weeklyGoal;
@@ -210,10 +215,14 @@ function SettingsForm({ onClose }: { onClose: () => void }) {
 
         {!valid && (
           <T variant="caption" color={Colors.warn}>
-            Check the numbers: the weekly goal must fit between 7× floor and 7× ceiling, and the floor should be at
-            least 800 kcal.
+            Check the numbers: the weekly goal must be at least {weeklyMin.toLocaleString('en-US')} kcal (
+            {safeFloor(sex).toLocaleString('en-US')}/day) and fit between 7× floor and 7× ceiling, and the daily floor
+            must be at least {dailyMin.toLocaleString('en-US')} kcal. Going lower isn’t safe without medical
+            supervision.
           </T>
         )}
+
+        <AccountSection onClose={onClose} />
 
         <View style={styles.danger}>
           <View style={{ flex: 1, gap: 2 }}>
@@ -272,6 +281,124 @@ function Field({
       {children}
       {hint ? <T variant="caption">{hint}</T> : null}
     </View>
+  );
+}
+
+/** Download and permanent deletion of the account's data, plus the privacy page. */
+function AccountSection({ onClose }: { onClose: () => void }) {
+  const { exportData, deleteAccount } = useStore();
+  const [deleting, setDeleting] = useState(false);
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const download = async () => {
+    setError(null);
+    try {
+      const payload = await exportData();
+      if (Platform.OS !== 'web') return;
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `healthos-export-${payload.exportedAt.slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Couldn’t download your data. Try again.');
+    }
+  };
+
+  const remove = async () => {
+    if (!password || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteAccount(password);
+      onClose();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Couldn’t delete your account. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Field label="Your data" hint="Everything HealthOS stores about you, and how to take it with you or erase it.">
+      <View style={[styles.profile, { gap: Spacing.two }]}>
+        <View style={{ flex: 1, gap: 2, minWidth: 180 }}>
+          <T variant="label" color={Colors.text}>
+            Download my data
+          </T>
+          <T variant="caption">Your profile, log, weigh-ins and plan as a JSON file.</T>
+        </View>
+        <Button size="sm" onPress={download}>
+          Download
+        </Button>
+      </View>
+
+      <View style={[styles.danger, { flexWrap: 'wrap' }]}>
+        <View style={{ flex: 1, gap: 2, minWidth: 180 }}>
+          <T variant="label" color={Colors.text}>
+            Delete account
+          </T>
+          <T variant="caption">Permanently erases your account and all its data from our servers. This can’t be undone.</T>
+        </View>
+        {!deleting && (
+          <Button kind="danger" size="sm" onPress={() => setDeleting(true)}>
+            Delete…
+          </Button>
+        )}
+        {deleting && (
+          <View style={{ width: '100%', gap: Spacing.two }}>
+            <View style={styles.inputWrap}>
+              <TextInput
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Enter your password to confirm"
+                placeholderTextColor={Colors.textMuted}
+                secureTextEntry
+                autoCapitalize="none"
+                autoComplete="current-password"
+                style={styles.input}
+                onSubmitEditing={remove}
+              />
+            </View>
+            <View style={{ flexDirection: 'row', gap: Spacing.two, justifyContent: 'flex-end' }}>
+              <Button
+                size="sm"
+                kind="ghost"
+                onPress={() => {
+                  setDeleting(false);
+                  setPassword('');
+                  setError(null);
+                }}>
+                Cancel
+              </Button>
+              <Button size="sm" kind="danger" disabled={!password || busy} onPress={remove}>
+                {busy ? 'Deleting…' : 'Delete forever'}
+              </Button>
+            </View>
+          </View>
+        )}
+      </View>
+
+      {error && (
+        <T variant="caption" color={Colors.danger}>
+          {error}
+        </T>
+      )}
+      <Pressable
+        onPress={() => {
+          onClose();
+          router.push('/privacy');
+        }}
+        hitSlop={6}>
+        <T variant="caption" color={Colors.accent}>
+          Privacy policy & health disclaimer
+        </T>
+      </Pressable>
+    </Field>
   );
 }
 
