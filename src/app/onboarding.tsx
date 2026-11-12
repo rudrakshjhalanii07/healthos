@@ -233,6 +233,12 @@ function YouStep({ profile, set }: ProfileStepProps) {
   );
 }
 
+/** Weekly loss, as a share of body weight, above which the pace gets a warning. */
+const FAST_LOSS_PCT = 0.01;
+/** Allowed, but worth a caution: judged on the pace the plan will actually use after caps. */
+const isFastLoss = (p: Profile, rateKg: number) =>
+  p.goal === 'lose' && (rateKg >= 0.75 || rateKg > p.weightKg * FAST_LOSS_PCT);
+
 /** Why a weight-loss goal can't be planned, or null if it can. */
 function goalProblem(p: Profile): string | null {
   if (p.goal !== 'lose') return null;
@@ -313,6 +319,12 @@ function GoalStep({ profile, set }: ProfileStepProps) {
           </T>
         </View>
         {e.weeksToTarget && <T variant="caption">≈ {e.weeksToTarget} weeks to goal weight at this pace.</T>}
+        {isFastLoss(profile, e.effectiveRate) && (
+          <T variant="caption" color={Colors.warn}>
+            Fast pace: losing more than about {FAST_LOSS_PCT * 100}% of body weight a week (or 0.75 kg+) is hard to
+            sustain and makes muscle loss, fatigue and rebound more likely. 0.5 kg/week is a steadier choice.
+          </T>
+        )}
         {e.limitedBy === 'cap' && (
           <T variant="caption" color={Colors.warn}>
             Capped at a {profile.goal === 'lose' ? '25% deficit' : '20% surplus'} ({e.effectiveRate.toFixed(2)} kg/week).

@@ -44,6 +44,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
 /** Neon Auth error codes worth rewording for people. */
 const FRIENDLY: Record<string, string> = {
   INVALID_EMAIL_OR_PASSWORD: 'Wrong email or password.',
+  INVALID_PASSWORD: 'Your current password is wrong.',
   USER_ALREADY_EXISTS: 'An account with this email already exists. Sign in instead.',
   USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: 'An account with this email already exists. Sign in instead.',
   INVALID_EMAIL: 'That doesn’t look like an email address.',

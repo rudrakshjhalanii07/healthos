@@ -184,6 +184,8 @@ type Store = {
   /** Confirms the emailed code, then signs in (with the password if the server didn't already). */
   verifyEmail: (email: string, code: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /** Changes the password; every other device is signed out, this one stays signed in. */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   /** Ends every session for this account, on all devices, then signs out here. */
   signOutEverywhere: () => Promise<void>;
   forgetUser: (email: string) => Promise<void>;
@@ -412,6 +414,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await api('/api/auth/sign-out', { method: 'POST', body: {} }).catch(() => {});
       if (a) await AsyncStorage.removeItem(cacheKey(a.email)).catch(() => {});
       clearSession();
+    },
+    changePassword: async (currentPassword, newPassword) => {
+      await api('/api/auth/change-password', {
+        method: 'POST',
+        body: { currentPassword, newPassword, revokeOtherSessions: true },
+      });
     },
     signOutEverywhere: async () => {
       const a = accountRef.current;

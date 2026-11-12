@@ -10,6 +10,7 @@ import { TreatsEditor } from './treats-editor';
 import { DAY_TYPE_STYLE, NEXT_DAY_TYPE } from '@/constants/day-types';
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api';
+import { MIN_PASSWORD } from '@/lib/email';
 import { classifyWeight, DAY_WEIGHT } from '@/lib/planner';
 import { dayFloor, energyPlan, safeFloor } from '@/lib/profile';
 import { CAN_SWITCH_LIVE, useThemeMode } from '@/lib/theme-mode';
@@ -284,6 +285,109 @@ function Field({
   );
 }
 
+function ChangePassword() {
+  const { changePassword } = useStore();
+  const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const mismatch = confirm.length > 0 && confirm !== next;
+  const sameAsOld = next.length > 0 && next === current;
+  const canSave = !busy && current.length > 0 && next.length >= MIN_PASSWORD && confirm === next && !sameAsOld;
+
+  const reset = () => {
+    setCurrent('');
+    setNext('');
+    setConfirm('');
+    setError(null);
+  };
+
+  const save = async () => {
+    if (!canSave) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await changePassword(current, next);
+      reset();
+      setOpen(false);
+      setDone(true);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Couldn’t change your password. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field = (value: string, onChange: (v: string) => void, placeholder: string, autoComplete: 'current-password' | 'new-password') => (
+    <View style={styles.inputWrap}>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        placeholder={placeholder}
+        placeholderTextColor={Colors.textMuted}
+        secureTextEntry
+        autoCapitalize="none"
+        autoComplete={autoComplete}
+        style={styles.input}
+        onSubmitEditing={save}
+      />
+    </View>
+  );
+
+  return (
+    <View style={[styles.profile, { gap: Spacing.two }]}>
+      <View style={{ flex: 1, gap: 2, minWidth: 180 }}>
+        <T variant="label" color={Colors.text}>
+          Change password
+        </T>
+        <T variant="caption" color={done ? Colors.accent : undefined}>
+          {done ? 'Password changed. Your other devices have been signed out.' : 'Other devices will be signed out; this one stays signed in.'}
+        </T>
+      </View>
+      {!open && (
+        <Button
+          size="sm"
+          onPress={() => {
+            setOpen(true);
+            setDone(false);
+          }}>
+          Change…
+        </Button>
+      )}
+      {open && (
+        <View style={{ width: '100%', gap: Spacing.two }}>
+          {field(current, setCurrent, 'Current password', 'current-password')}
+          {field(next, setNext, `New password (at least ${MIN_PASSWORD} characters)`, 'new-password')}
+          {field(confirm, setConfirm, 'Confirm new password', 'new-password')}
+          {(mismatch || sameAsOld || error) && (
+            <T variant="caption" color={error ? Colors.danger : Colors.warn}>
+              {error ?? (mismatch ? 'New passwords don’t match.' : 'Choose a password different from your current one.')}
+            </T>
+          )}
+          <View style={{ flexDirection: 'row', gap: Spacing.two, justifyContent: 'flex-end' }}>
+            <Button
+              size="sm"
+              kind="ghost"
+              onPress={() => {
+                reset();
+                setOpen(false);
+              }}>
+              Cancel
+            </Button>
+            <Button size="sm" kind="primary" disabled={!canSave} onPress={save}>
+              {busy ? 'Saving…' : 'Change password'}
+            </Button>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
 const FEEDBACK_URL = `mailto:rudrakshjhalanii@gmail.com?subject=${encodeURIComponent('HealthOS feedback')}`;
 
 /** Download and permanent deletion of the account's data, plus the privacy page. */
@@ -339,6 +443,8 @@ function AccountSection({ onClose }: { onClose: () => void }) {
           Download
         </Button>
       </View>
+
+      <ChangePassword />
 
       <View style={[styles.profile, { gap: Spacing.two }]}>
         <View style={{ flex: 1, gap: 2, minWidth: 180 }}>
