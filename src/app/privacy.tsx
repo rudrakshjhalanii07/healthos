@@ -63,6 +63,10 @@ export default function Privacy() {
           <Item>Neon stores your account and data in a Postgres database in the US (AWS us-east-1), handles sign-in, and sends password-reset emails.</Item>
           <Item>Google Fonts serves the app’s typefaces, so Google sees your IP address when the fonts load.</Item>
           <Item>Your browser keeps a copy of your data so the app opens instantly and works offline. Signing out removes it.</Item>
+          <Item>
+            To recover from mistakes or outages, an encrypted copy of the database is made every night and stored
+            privately in GitHub for 30 days. Only the app owner holds the key to open it.
+          </Item>
         </Section>
 
         <Section title="Your choices">
@@ -70,7 +74,8 @@ export default function Privacy() {
           <Item>Download everything we store about you under Settings → Your data → Download.</Item>
           <Item>
             Delete your account under Settings → Your data → Delete account. Your account and data are erased from our
-            database immediately; database recovery history may keep a copy for a short time before it expires.
+            live database immediately. Encrypted backups made before the deletion are kept for up to 30 days, then
+            expire automatically.
           </Item>
         </Section>
 

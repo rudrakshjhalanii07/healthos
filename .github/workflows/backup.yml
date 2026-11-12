@@ -1,0 +1,67 @@
+# Nightly encrypted backup of the Neon database, kept for 30 days as a private workflow artifact.
+#
+# Secrets (Settings → Secrets and variables → Actions):
+#   BACKUP_DATABASE_URL  direct (non-pooled) URL for the read-only `healthos_backup` role
+#   BACKUP_PASSPHRASE    encryption passphrase — keep a copy in your password manager; without it
+#                        the backups can't be opened
+#
+# To restore, see scripts/restore-backup.sh. GitHub emails you if a scheduled run fails.
+name: Nightly database backup
+
+on:
+  schedule:
+    - cron: '30 21 * * *' # 03:00 IST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Install PostgreSQL 18 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-18
+
+      - name: Dump and encrypt
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          [ -n "$BACKUP_DATABASE_URL" ] || { echo "::error::BACKUP_DATABASE_URL secret is missing"; exit 1; }
+          [ "${#BACKUP_PASSPHRASE}" -ge 20 ] || { echo "::error::BACKUP_PASSPHRASE secret is missing or too short"; exit 1; }
+          umask 077
+          PG=/usr/lib/postgresql/18/bin
+          NAME="healthos-$(date -u +%Y-%m-%dT%H%MZ)"
+
+          # App data plus accounts. Sessions and one-time codes are short-lived secrets that a
+          # restore never needs, so their rows are left out.
+          "$PG/pg_dump" "$BACKUP_DATABASE_URL" --format=custom --no-owner --no-privileges \
+            --schema=public --schema=neon_auth \
+            --exclude-table-data=neon_auth.session --exclude-table-data=neon_auth.verification \
+            -f backup.dump
+          "$PG/pg_restore" --list backup.dump | grep -q 'TABLE DATA public user_data' \
+            || { echo "::error::Dump is missing user_data"; exit 1; }
+
+          openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -pass env:BACKUP_PASSPHRASE \
+            -in backup.dump -out "$NAME.dump.enc"
+          shred -u backup.dump
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+          echo "Backup $NAME: $(wc -c < "$NAME.dump.enc") bytes encrypted" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Store for 30 days
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: '*.dump.enc'
+          retention-days: 30
+          compression-level: 0
+          if-no-files-found: error
