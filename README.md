@@ -4,10 +4,10 @@
 
 HealthOS is a cross-platform nutrition tracking application built with Expo, React Native and TypeScript. Rather than treating every day as an isolated calorie target, it plans across the week, accounts for logged intake and planned treats, and can learn from food logs and weigh-ins to propose more personalised targets.
 
-- **Live web app:** https://healthos-flax.vercel.app
+- **Live web app:** https://healthos.opulenceoutput.in
 - **Repository:** https://github.com/rudrakshjhalanii07/healthos
 
-> **Health disclaimer:** HealthOS provides estimates for general informational use. It is not medical advice, diagnosis or treatment, and is not a substitute for a qualified healthcare professional. The app is intended for adults. See the in-app [Privacy & health disclaimer](https://healthos-flax.vercel.app/privacy) before using it.
+> **Health disclaimer:** HealthOS provides estimates for general informational use. It is not medical advice, diagnosis or treatment, and is not a substitute for a qualified healthcare professional. The app is intended for adults. See the in-app [Privacy & health disclaimer](https://healthos.opulenceoutput.in/privacy) before using it.
 
 ## Product capabilities
 
