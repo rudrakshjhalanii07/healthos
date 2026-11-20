@@ -186,7 +186,7 @@ The repository is configured for Vercel:
 - API serverless entry: `api/index.ts`, backed by the Expo server build in `dist/server`
 - Rewrites route non-static requests to the API entry.
 
-Set the required server-side environment variables in the Vercel project before deploying. Review the Content Security Policy and other response headers in `vercel.json) if you add new external services, fonts or image hosts.
+Set the required server-side environment variables in the Vercel project before deploying. Review the Content Security Policy and other response headers in `vercel.json` if you add new external services, fonts or image hosts.
 
 ## Backups
 
