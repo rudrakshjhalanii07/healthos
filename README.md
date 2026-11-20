@@ -216,12 +216,14 @@ Before running your own instance:
 - The app is designed for adults and is not a medical device or a substitute for individual clinical advice.
 - The repository does not currently document a dedicated automated unit/integration test suite. Add tests around planner invariants, learning calculations, account flows and sync conflicts before relying on those paths in production.
 
-## Contributing
+## Contributions and feedback
 
-Issues and pull requests are welcome once the project is opened for public collaboration. Please avoid submitting real health data, credentials, database dumps or other private information in issues and pull requests.
+HealthOS is published as a proprietary portfolio project, not as an open-source contribution project. Please do not submit pull requests that copy, modify or redistribute project code. You may use GitHub issues to report a security concern or share concise feedback, but do not include real health data, credentials, database dumps or other private information.
 
-## License
+## Copyright and usage
 
-The repository currently contains a `LICENSE` file with an MIT licence text and an Expo / 650 Industries copyright notice. That file's scope and provenance have not yet been reconciled with the original HealthOS code and any third-party template material.
+Copyright (c) 2026 Rudraksh Jhalani. All rights reserved, subject to applicable third-party rights and notices.
 
-**Do not assume that the current file grants an MIT licence to every part of HealthOS.** The repository owner should verify the rights and replace or supplement the licence notices appropriately before treating the project as an open-source release. Third-party dependencies and assets remain subject to their own licences.
+**This repository is public for portfolio review and demonstration only. No open-source licence is granted for the original HealthOS source code.** Viewing the repository through GitHub does not grant general permission to copy, modify, redistribute, sublicense, or commercially exploit the HealthOS code. Any rights GitHub grants its users under its Terms of Service remain applicable. Third-party dependencies, fonts, icons, images and other assets are governed by their respective licences and terms; this notice does not change those rights.
+
+For details, see [COPYRIGHT.md](./COPYRIGHT.md).
